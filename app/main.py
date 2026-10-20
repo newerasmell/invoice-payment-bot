@@ -15,14 +15,15 @@ from app.bank.factory import make_bank_provider
 from app.bot.setup import make_bot, make_dispatcher
 from app.companies import load_companies_file, seed_approvers, seed_companies
 from app.config import Settings, get_settings
-from app.db.session import Database, create_schema
+from app.db.migrate import upgrade_to_head
+from app.db.session import Database
 
 log = logging.getLogger("app")
 
 
 async def bootstrap(settings: Settings) -> Database:
     db = Database(settings.database_url)
-    await create_schema(db.engine)
+    await upgrade_to_head(settings.database_url)
     async with db.session() as s:
         created = await seed_companies(s, load_companies_file(settings.companies_file))
         if created:
@@ -90,6 +91,10 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     @app.exception_handler(CsrfFailed)
     async def _csrf_failed(request: Request, exc: CsrfFailed) -> PlainTextResponse:
         return PlainTextResponse("Form expired, go back and reload the page.", status_code=400)
+
+    @app.get("/", include_in_schema=False)
+    async def root() -> RedirectResponse:
+        return RedirectResponse("/admin", status_code=307)
 
     @app.get("/health")
     async def health() -> dict[str, object]:

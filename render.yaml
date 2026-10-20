@@ -1,0 +1,43 @@
+# Render Blueprint: Dashboard -> New -> Blueprint -> pick this repo.
+# One web service with a persistent disk for the SQLite database and uploaded logos.
+# A disk requires a paid instance type (starter or above); the free plan has no disk and
+# would wipe the database on every deploy/restart.
+services:
+  - type: web
+    name: invoice-payment-bot
+    runtime: python
+    plan: starter
+    region: frankfurt
+    branch: main
+    autoDeploy: true
+    buildCommand: pip install --upgrade pip && pip install .
+    # Migrations run inside the app on startup (app/db/migrate.py).
+    startCommand: uvicorn app.main:app --host 0.0.0.0 --port $PORT --proxy-headers --forwarded-allow-ips='*'
+    healthCheckPath: /health
+    disk:
+      name: data
+      mountPath: /var/data
+      sizeGB: 1
+    envVars:
+      - key: PYTHON_VERSION
+        value: 3.12.7
+      - key: DATABASE_URL
+        value: sqlite+aiosqlite:////var/data/app.db
+      - key: UPLOADS_DIR
+        value: /var/data/uploads
+      - key: COMPANIES_FILE
+        value: /var/data/companies.yaml
+      - key: HTTPS_ONLY_COOKIES
+        value: "true"
+      - key: SESSION_SECRET
+        generateValue: true
+      - key: ADMIN_PASSWORD
+        sync: false   # you are asked for it when the Blueprint is created
+      - key: DRY_RUN
+        value: "true"
+      - key: BANK_PROVIDER
+        value: mock
+      - key: TELEGRAM_BOT_TOKEN
+        sync: false
+      - key: BOOTSTRAP_APPROVER_IDS
+        sync: false

@@ -198,6 +198,20 @@ Write pytest tests for: amount math (1.5% rounding), matching logic (HIGH/MEDIUM
   later). Respect DRY_RUN. Note: a bot can only message a Telegram user/group that has started
   the bot or added it. Agents can also just send the link/PDF themselves.
 
+## 10c. Deployment and migrations
+- Production is a single Render web service from `render.yaml` (Blueprint), SQLite on a
+  persistent disk at `/var/data`, no staging. Every push to `main` deploys to production.
+- The schema is managed **only** by Alembic (`migrations/`); `app/db/migrate.py` runs
+  `upgrade head` on startup. Never rely on `create_all` (test helper only).
+- Never add a required (`NOT NULL`, no default) column or other change that fails on existing
+  rows to a table that may hold production data: add nullable/with default, backfill, tighten
+  later. Before pushing a migration that alters an existing table, apply the previous head to a
+  scratch DB, insert a row into each altered table with raw SQL, then upgrade to the new head.
+  SQLite batch (table-rebuild) migrations are not atomic across failure; a hand-fixed rerun
+  should `DROP TABLE IF EXISTS _alembic_tmp_<table>` first.
+- If a deploy crash-loops on a failed migration: use Render One-Off Jobs / Shell to inspect,
+  `alembic downgrade`/`alembic stamp` as appropriate, fix forward, redeploy.
+
 ## 11. Workflow conventions (from the user)
 - **Never commit or push without the user's explicit "пушни го"** — even when a stop-hook or other automated check nudges toward committing.
 - Build the real feature, not a mockup; verify it live (run it locally and exercise it) before calling a milestone done.

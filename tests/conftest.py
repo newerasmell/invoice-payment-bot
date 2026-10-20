@@ -14,7 +14,8 @@ from app.bank.mock import MockBankProvider
 from app.bot.setup import make_bot, make_dispatcher
 from app.companies import load_companies_file, seed_approvers, seed_companies
 from app.config import Settings
-from app.db.session import Database, create_schema
+from app.db.migrate import upgrade_to_head
+from app.db.session import Database
 
 ROOT = Path(__file__).resolve().parent.parent
 APPROVER_ID = 1001
@@ -68,7 +69,7 @@ def settings(tmp_path: Path) -> Settings:
 @pytest.fixture
 async def db(settings: Settings) -> AsyncIterator[Database]:
     database = Database(settings.database_url)
-    await create_schema(database.engine)
+    await upgrade_to_head(settings.database_url)
     async with database.session() as s:
         await seed_companies(s, load_companies_file(settings.companies_file))
         await seed_approvers(s, settings.bootstrap_approver_ids)

@@ -27,7 +27,7 @@ def make_engine(url: str) -> AsyncEngine:
 
 
 async def create_schema(engine: AsyncEngine) -> None:
-    # MVP: create_all. Switch to Alembic migrations before the first real deployment.
+    """Test helper only. The app itself builds the schema with Alembic migrations."""
     async with engine.begin() as conn:
         await conn.run_sync(Base.metadata.create_all)
 
