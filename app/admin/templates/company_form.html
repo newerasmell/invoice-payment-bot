@@ -1,0 +1,119 @@
+{% extends "base.html" %}
+{% from "_macros.html" import field, csrf_input, post_button %}
+{% set section = "companies" %}
+{% set is_new = company.id is none %}
+{% macro v(name) %}{{ values[name] if name in values else (company[name] if company[name] is not none else "") }}{% endmacro %}
+{% block title %}{{ "New company" if is_new else company.name }}{% endblock %}
+{% block content %}
+<div class="crumbs"><a href="/admin">Companies</a> /</div>
+<h1>{{ "New company" if is_new else (company.legal_name or company.name) }}</h1>
+<p class="sub">{{ "Create an issuer profile." if is_new else "Issuer profile, bank accounts and invoice templates." }}</p>
+{% if errors %}<div class="alert">Please fix the highlighted fields.</div>{% endif %}
+
+<form method="post" action="{{ '/admin/companies/new' if is_new else '/admin/companies/%d' % company.id }}" class="panel">
+  {{ csrf_input(csrf) }}
+  <h2>Profile</h2>
+  <div class="form-grid">
+    {{ field("code", "Code", v("code"), errors, hint="Short handle used in bot commands, e.g. X", required=true) }}
+    {{ field("name", "Display name", v("name"), errors, required=true) }}
+    {{ field("legal_name", "Legal name", v("legal_name"), errors, hint="As printed on invoices", cls="full") }}
+    {{ field("eik", "Company ID (EIK)", v("eik"), errors) }}
+    {{ field("vat_id", "VAT number", v("vat_id"), errors, hint="Leave empty if not VAT registered") }}
+    {{ field("address", "Address", v("address"), errors, cls="full") }}
+    {{ field("city", "City", v("city"), errors) }}
+    {{ field("country", "Country", v("country"), errors) }}
+    {{ field("manager", "Represented by", v("manager"), errors, hint="Manager / signatory") }}
+    {{ field("phone", "Phone", v("phone"), errors) }}
+    {{ field("email_from", "Invoice sender email", v("email_from"), errors, type="email") }}
+    {{ field("website", "Website", v("website"), errors) }}
+  </div>
+  <h2 style="margin-top:22px">Invoicing defaults</h2>
+  <div class="form-grid">
+    {{ field("invoice_prefix", "Number prefix", v("invoice_prefix"), errors, hint="Optional; numbers are 10 digits") }}
+    {{ field("invoice_next_number", "Next invoice number", v("invoice_next_number"), errors, type="number", attrs='min="1"') }}
+    {{ field("default_currency", "Default currency", v("default_currency"), errors, attrs='maxlength="3"') }}
+    {{ field("default_vat_rate", "Default VAT rate (%)", v("default_vat_rate"), errors) }}
+    {{ field("default_payment_terms_days", "Payment terms (days)", v("default_payment_terms_days"), errors, type="number", attrs='min="0"') }}
+    {{ field("no_vat_note", "Note when VAT is 0%", v("no_vat_note"), errors, type="textarea", cls="full", hint="Legal basis for no VAT; confirm wording with the accountant") }}
+  </div>
+  <div class="actions" style="margin-top:18px">
+    <button class="btn" type="submit">{{ "Create company" if is_new else "Save profile" }}</button>
+    <a class="btn secondary" href="/admin">Cancel</a>
+  </div>
+</form>
+
+{% if not is_new %}
+<div class="panel">
+  <h2>Logo</h2>
+  <div class="logo-box">
+    {% if company.logo_path %}<img src="/admin/companies/{{ company.id }}/logo" alt="Logo">{% else %}<span class="muted">No logo uploaded.</span>{% endif %}
+    <form method="post" action="/admin/companies/{{ company.id }}/logo" enctype="multipart/form-data" class="actions">
+      {{ csrf_input(csrf) }}
+      <input type="file" name="logo" accept="image/png,image/jpeg,image/svg+xml">
+      <button class="btn secondary small" type="submit">Upload</button>
+    </form>
+    {% if company.logo_path %}{{ post_button("/admin/companies/%d/logo/delete" % company.id, "Remove", csrf, "btn danger small", "Remove the logo?") }}{% endif %}
+  </div>
+  <div class="hint muted small" style="margin-top:6px">PNG, JPG or SVG, up to 1 MB.</div>
+</div>
+
+<div class="panel" id="accounts">
+  <div class="panel-head">
+    <h2>Bank accounts</h2>
+    <a class="btn secondary small" href="/admin/companies/{{ company.id }}/accounts/new">+ Add account</a>
+  </div>
+  {% if company.bank_accounts %}
+  <table class="list">
+    <thead><tr><th>Label</th><th>Currency</th><th>IBAN</th><th>Bank</th><th>Bank API account</th><th></th></tr></thead>
+    <tbody>
+    {% for a in company.bank_accounts %}
+    <tr>
+      <td>{{ a.label }} {% if a.is_default %}<span class="badge ok">default</span>{% endif %}</td>
+      <td>{{ a.currency }}</td>
+      <td class="mono">{{ a.iban }}</td>
+      <td>{{ a.bank_name or "" }}{% if a.bic %}<div class="muted small mono">{{ a.bic }}</div>{% endif %}</td>
+      <td class="mono">{{ a.bank_account_ref or "-" }}</td>
+      <td class="actions" style="justify-content:flex-end">
+        <a class="btn secondary small" href="/admin/companies/{{ company.id }}/accounts/{{ a.id }}">Edit</a>
+        {{ post_button("/admin/companies/%d/accounts/%d/delete" % (company.id, a.id), "Delete", csrf, "btn danger small", "Delete this bank account?") }}
+      </td>
+    </tr>
+    {% endfor %}
+    </tbody>
+  </table>
+  {% else %}<div class="empty">No bank accounts yet.</div>{% endif %}
+</div>
+
+<div class="panel" id="templates">
+  <div class="panel-head">
+    <h2>Invoice templates</h2>
+    <form method="post" action="/admin/companies/{{ company.id }}/templates/new" class="actions">
+      {{ csrf_input(csrf) }}
+      <input type="text" name="name" placeholder="Template name" style="width:180px">
+      <button class="btn secondary small" type="submit">+ New template</button>
+    </form>
+  </div>
+  {% if company.templates %}
+  <div class="tpl-cards">
+    {% for t in company.templates | sort(attribute="archived") %}
+    <div class="tpl-card {{ 'archived' if t.archived }}">
+      <a class="thumb" href="/admin/templates/{{ t.id }}"><iframe src="/admin/templates/{{ t.id }}/preview" loading="lazy" tabindex="-1" title="Preview"></iframe></a>
+      <div class="meta">
+        <div><b>{{ t.name }}</b>
+          {% if company.default_template_id == t.id %}<span class="badge ok">default</span>{% endif %}
+          {% if t.archived %}<span class="badge grey">archived</span>{% endif %}
+        </div>
+        <div class="muted small">{{ LAYOUTS.get(t.layout, t.layout).split(" - ")[0] }} layout</div>
+        <div class="actions">
+          <a class="btn secondary small" href="/admin/templates/{{ t.id }}">Edit</a>
+          {% if company.default_template_id != t.id and not t.archived %}{{ post_button("/admin/templates/%d/default" % t.id, "Make default", csrf) }}{% endif %}
+          {{ post_button("/admin/templates/%d/archive" % t.id, "Restore" if t.archived else "Archive", csrf) }}
+        </div>
+      </div>
+    </div>
+    {% endfor %}
+  </div>
+  {% else %}<div class="empty">No templates yet.</div>{% endif %}
+</div>
+{% endif %}
+{% endblock %}

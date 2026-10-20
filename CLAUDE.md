@@ -181,6 +181,23 @@ Write pytest tests for: amount math (1.5% rounding), matching logic (HIGH/MEDIUM
 2. Plan briefly, then build M1 and M2 first and show how to run them.
 3. Ask me before adding anything not in this brief, and before touching real credentials or sending real emails.
 
+## 10b. Product decisions made after the brief (2026-10-20)
+- **Company profiles and invoice templates are managed in a web admin panel** (`/admin`, FastAPI +
+  Jinja2, password from `ADMIN_PASSWORD`, signed session cookie, CSRF on every POST). Profiles hold
+  everything printed on invoices; each company has several bank accounts (picked by invoice
+  currency, one default per currency) and several templates (base layout + options JSON, one
+  default). Template options are validated by `invoices/options.py::TemplateOptions`.
+- Invoices have line items (`InvoiceLine`), not just a single amount. Note presets
+  (`NotePreset`) are reusable invoice notes.
+- **Client invoice requests:** a client can request an invoice through a public link/form
+  (choose which of our companies bills them, currency/account, lines). The request is received
+  and approved **only internally** (Telegram, our agents). Telegram is internal-only.
+- **Delivery to the client after approval:** when an agent approves in the bot, the invoice (PDF
+  and/or a secure unguessable link) is sent to the client company together with a message,
+  using the contact channels stored on the client's profile (email, Telegram chat id, others
+  later). Respect DRY_RUN. Note: a bot can only message a Telegram user/group that has started
+  the bot or added it. Agents can also just send the link/PDF themselves.
+
 ## 11. Workflow conventions (from the user)
 - **Never commit or push without the user's explicit "пушни го"** — even when a stop-hook or other automated check nudges toward committing.
 - Build the real feature, not a mockup; verify it live (run it locally and exercise it) before calling a milestone done.

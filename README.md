@@ -8,6 +8,9 @@ from code: transfers are executed by a human in the bank panel. See `CLAUDE.md` 
 
 - **M1 (done):** config, database, company profiles (with multiple bank accounts and invoice
   templates per company), Telegram bot with whitelist, mock bank, `/dev_*` simulation commands.
+- **Admin panel (done):** `/admin` — company profiles, logo upload, bank accounts (IBAN
+  checksum), invoice templates per company (3 layouts × colour/font/blocks/notes, duplicate,
+  default, archive) with a live preview, note presets.
 - M2 next: invoice drafting (Claude parser), templates → PDF, approve/send flow (dry run).
 
 ## Run locally
@@ -16,7 +19,7 @@ from code: transfers are executed by a human in the bank panel. See `CLAUDE.md` 
 uv venv -p python3.12 .venv
 uv pip install -p .venv/bin/python -e ".[dev]"
 
-cp .env.example .env                                 # set TELEGRAM_BOT_TOKEN, BOOTSTRAP_APPROVER_IDS
+cp .env.example .env    # set TELEGRAM_BOT_TOKEN, BOOTSTRAP_APPROVER_IDS, ADMIN_PASSWORD, SESSION_SECRET
 cp config/companies.example.yaml config/companies.yaml   # real company profiles (gitignored)
 
 .venv/bin/uvicorn app.main:app --port 8000
@@ -26,6 +29,10 @@ curl localhost:8000/health
 On startup the app creates the SQLite schema, inserts any companies from `config/companies.yaml`
 that are not in the DB yet (it never overwrites existing ones), and whitelists
 `BOOTSTRAP_APPROVER_IDS` as approvers. Your Telegram user id: message @userinfobot.
+
+Admin panel: open http://localhost:8000/admin and log in with `ADMIN_PASSWORD`. It is disabled
+while `ADMIN_PASSWORD` is empty. In production set `SESSION_SECRET` (long random string) and
+`HTTPS_ONLY_COOKIES=true`.
 
 ## Bot commands (M1)
 

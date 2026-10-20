@@ -32,6 +32,14 @@ class Settings(BaseSettings):
     paynetics_secret_key: SecretStr | None = None
     poll_interval_seconds: int = 120
 
+    # Web admin panel (/admin). Disabled while ADMIN_PASSWORD is empty.
+    admin_password: SecretStr | None = None
+    # Signs the admin session cookie. If empty, a random one is generated per process.
+    session_secret: SecretStr | None = None
+    uploads_dir: Path = Path("data/uploads")
+    # Set true when served over HTTPS (production) so the session cookie is Secure.
+    https_only_cookies: bool = False
+
     # Safety
     dry_run: bool = True
     dry_run_email: str | None = None

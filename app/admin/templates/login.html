@@ -1,0 +1,28 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Log in · Invoice Bot</title>
+<link rel="stylesheet" href="/admin/static/admin.css">
+</head>
+<body>
+<div class="login panel">
+  <h1>Invoice Bot admin</h1>
+  <p class="sub">Company profiles and invoice templates</p>
+  {% if not enabled %}
+  <div class="alert">The admin panel is disabled. Set <code>ADMIN_PASSWORD</code> in <code>.env</code> and restart.</div>
+  {% else %}
+  {% if error %}<div class="alert">{{ error }}</div>{% endif %}
+  <form method="post" action="/admin/login">
+    <input type="hidden" name="csrf" value="{{ csrf }}">
+    <div class="field" style="margin-bottom:14px">
+      <label for="pw">Password</label>
+      <input id="pw" type="password" name="password" autofocus required autocomplete="current-password">
+    </div>
+    <button class="btn" type="submit">Log in</button>
+  </form>
+  {% endif %}
+</div>
+</body>
+</html>

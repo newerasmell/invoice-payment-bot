@@ -1,0 +1,27 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>{% block title %}Admin{% endblock %} · Invoice Bot</title>
+<link rel="stylesheet" href="/admin/static/admin.css">
+</head>
+<body>
+<div class="shell">
+  <nav class="nav">
+    <div class="brand">Invoice Bot · Admin</div>
+    <a href="/admin" class="{{ 'active' if section == 'companies' }}">Companies</a>
+    <a href="/admin/notes" class="{{ 'active' if section == 'notes' }}">Note presets</a>
+    <form method="post" action="/admin/logout">
+      <input type="hidden" name="csrf" value="{{ csrf }}">
+      <button class="linkbtn" type="submit">Log out</button>
+    </form>
+  </nav>
+  <main>
+    {% if flash %}<div class="flash">{{ flash }}</div>{% endif %}
+    {% block content %}{% endblock %}
+  </main>
+</div>
+{% block scripts %}{% endblock %}
+</body>
+</html>

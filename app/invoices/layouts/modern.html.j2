@@ -1,0 +1,42 @@
+{% extends "_base.html.j2" %}
+{% from "_macros.html.j2" import party, meta, lines, totals, bank, notes, signature, logo with context %}
+{% block style %}
+  .page { padding-left: 10mm; }
+  .page::before { content: ""; position: absolute; left: 0; top: 0; bottom: 0; width: 3mm; background: {{ o.accent_color }}; border-radius: 2px; }
+  .top td { vertical-align: top; }
+  .title { font-size: 30pt; font-weight: 700; color: {{ o.accent_color }}; letter-spacing: -.01em; line-height: 1; }
+  .logo { max-height: 56px; max-width: 180px; margin-bottom: 10px; }
+  .hero { margin-top: 22px; background: #f6f7f9; border-radius: 6px; padding: 14px 16px; }
+  .hero .label { margin: 0; }
+  .hero .amount { font-size: 24pt; font-weight: 700; color: {{ o.accent_color }}; }
+  .parties { margin-top: 20px; }
+  .parties td { width: 50%; vertical-align: top; padding-right: 16px; }
+  .lines thead th { border-bottom: 2px solid {{ o.accent_color }}; color: {{ o.accent_color }}; }
+  .totals .grand th, .totals .grand td { color: #fff; background: {{ o.accent_color }}; }
+{% endblock %}
+{% block body %}
+<table class="top"><tr>
+  <td>
+    {% if o.logo_position == "left" %}{{ logo() }}<br>{% endif %}
+    <div class="title">{{ o.title }}</div>
+  </td>
+  <td style="width:42%">
+    {% if o.logo_position == "right" %}<div style="text-align:right">{{ logo() }}</div>{% endif %}
+    {{ meta() }}
+  </td>
+</tr></table>
+{% if o.header_note %}<p class="header-note" style="margin-top:12px">{{ o.header_note }}</p>{% endif %}
+<table class="hero"><tr>
+  <td><div class="label">Amount due</div><div class="amount">{{ inv.gross | money }} {{ inv.currency }}</div></td>
+  {% if o.show_due_date and inv.due_date %}<td style="text-align:right"><div class="label">Due by</div><div style="font-size:13pt;font-weight:600">{{ inv.due_date | date }}</div></td>{% endif %}
+</tr></table>
+<table class="parties"><tr>
+  <td>{{ party("From", inv.supplier) }}</td>
+  <td>{{ party("Bill to", inv.customer) }}</td>
+</tr></table>
+{{ lines() }}
+{{ totals() }}
+{{ notes() }}
+{{ bank() }}
+{{ signature() }}
+{% endblock %}

@@ -1,0 +1,34 @@
+{% extends "_base.html.j2" %}
+{% from "_macros.html.j2" import party, meta, lines, totals, bank, notes, signature, logo with context %}
+{% block style %}
+  body { color: #111; }
+  .head td { vertical-align: bottom; }
+  .title { font-size: 13pt; font-weight: 600; letter-spacing: .3em; text-transform: uppercase; }
+  .logo { max-height: 40px; max-width: 150px; filter: grayscale(100%); }
+  hr { border: 0; border-top: 1px solid #111; margin: 14px 0 20px; }
+  .parties td { width: 33.3%; vertical-align: top; padding-right: 14px; }
+  .label { color: {{ o.accent_color }}; }
+  .lines thead th { border-bottom: 1px solid #111; padding-left: 0; }
+  .lines td { padding-left: 0; border-bottom-color: #eee; }
+  .totals .grand th, .totals .grand td { border-top: 1px solid #111; }
+  .bank { border: 0; padding: 0; }
+{% endblock %}
+{% block body %}
+<table class="head"><tr>
+  {% if o.logo_position == "left" %}<td style="width:1%;padding-right:14px">{{ logo() }}</td>{% endif %}
+  <td><div class="title">{{ o.title }}</div></td>
+  <td style="text-align:right">{% if o.logo_position == "right" %}{{ logo() }}{% else %}<span class="muted">No</span> <b>{{ inv.number }}</b>{% endif %}</td>
+</tr></table>
+<hr>
+{% if o.header_note %}<p class="header-note">{{ o.header_note }}</p>{% endif %}
+<table class="parties"><tr>
+  <td>{{ party("From", inv.supplier) }}</td>
+  <td>{{ party("To", inv.customer) }}</td>
+  <td style="padding-right:0">{{ meta() }}</td>
+</tr></table>
+{{ lines() }}
+{{ totals() }}
+{{ notes() }}
+{{ bank() }}
+{{ signature() }}
+{% endblock %}

@@ -1,0 +1,114 @@
+{% extends "base.html" %}
+{% from "_macros.html" import csrf_input, post_button %}
+{% set section = "companies" %}
+{% block title %}{{ tpl.name }} · Template{% endblock %}
+{% block content %}
+<div class="crumbs"><a href="/admin">Companies</a> / <a href="/admin/companies/{{ company.id }}#templates">{{ company.name }}</a> /</div>
+<div class="panel-head">
+  <div>
+    <h1>{{ tpl.name }} {% if company.default_template_id == tpl.id %}<span class="badge ok">default</span>{% endif %}</h1>
+    <p class="sub" style="margin:0">Invoice template for {{ company.legal_name or company.name }}. The preview uses sample data and updates as you type.</p>
+  </div>
+  <div class="actions">
+    {{ post_button("/admin/templates/%d/duplicate" % tpl.id, "Duplicate", csrf) }}
+    <a class="btn secondary small" href="/admin/templates/{{ tpl.id }}/preview" target="_blank">Open preview</a>
+  </div>
+</div>
+{% if errors %}<div class="alert">{% for k, msg in errors.items() %}<div><b>{{ k }}</b>: {{ msg }}</div>{% endfor %}</div>{% endif %}
+
+<div class="editor">
+  <form id="tpl-form" class="panel controls" method="post" action="/admin/templates/{{ tpl.id }}">
+    {{ csrf_input(csrf) }}
+    <div class="field">
+      <label for="f-name">Template name</label>
+      <input id="f-name" type="text" name="name" value="{{ tpl.name }}" required>
+    </div>
+    <div class="field">
+      <label for="f-layout">Layout</label>
+      <select id="f-layout" name="layout">
+        {% for key, label in LAYOUTS.items() %}<option value="{{ key }}" {{ 'selected' if tpl.layout == key }}>{{ label }}</option>{% endfor %}
+      </select>
+    </div>
+    <div class="field">
+      <label for="f-accent">Accent colour</label>
+      <div class="color-row">
+        <input type="color" id="f-accent-picker" value="{{ o.accent_color }}" aria-label="Pick colour">
+        <input type="text" id="f-accent" name="accent_color" value="{{ o.accent_color }}" class="mono" maxlength="7">
+      </div>
+      <div class="swatches">
+        {% for c in ["#1F3A5F", "#0F766E", "#7C3AED", "#B91C1C", "#C2410C", "#111827", "#0369A1", "#4D7C0F"] %}
+        <button type="button" class="swatch" style="background:{{ c }}" data-color="{{ c }}" title="{{ c }}"></button>
+        {% endfor %}
+      </div>
+    </div>
+    <div class="field">
+      <label for="f-font">Font</label>
+      <select id="f-font" name="font">
+        {% for key in FONTS %}<option value="{{ key }}" {{ 'selected' if o.font == key }}>{{ key }}</option>{% endfor %}
+      </select>
+    </div>
+    <div class="field">
+      <label for="f-title">Document title</label>
+      <input id="f-title" type="text" name="title" value="{{ o.title }}" maxlength="40">
+    </div>
+    <div class="field">
+      <label for="f-logo">Logo</label>
+      <select id="f-logo" name="logo_position">
+        {% for key, label in [("left", "Left"), ("right", "Right"), ("none", "Hidden")] %}<option value="{{ key }}" {{ 'selected' if o.logo_position == key }}>{{ label }}</option>{% endfor %}
+      </select>
+      {% if not company.logo_path %}<div class="hint">This company has no logo yet. <a href="/admin/companies/{{ company.id }}">Upload one</a>.</div>{% endif %}
+    </div>
+    <div class="field">
+      <label>Show</label>
+      {% for key, label in [("show_due_date", "Due date"), ("show_vat_breakdown", "VAT breakdown"), ("show_bank_details", "Bank details"), ("show_line_numbers", "Line numbers"), ("show_signature", "Signature lines")] %}
+      <label class="check"><input type="checkbox" name="{{ key }}" {{ 'checked' if o[key] }}> {{ label }}</label>
+      {% endfor %}
+    </div>
+    <div class="field">
+      <label for="f-header">Header note</label>
+      <textarea id="f-header" name="header_note" placeholder="Optional text under the title">{{ o.header_note }}</textarea>
+    </div>
+    <div class="field">
+      <label for="f-footer">Footer note</label>
+      <textarea id="f-footer" name="footer_note" placeholder="e.g. registration details, thank-you line">{{ o.footer_note }}</textarea>
+    </div>
+    {% if company.default_template_id != tpl.id %}
+    <label class="check"><input type="checkbox" name="make_default"> Make this the company's default template</label>
+    {% endif %}
+    <div class="actions" style="margin-top:14px">
+      <button class="btn" type="submit">Save template</button>
+      <a class="btn secondary" href="/admin/companies/{{ company.id }}#templates">Back</a>
+    </div>
+  </form>
+  <div class="preview-wrap">
+    <iframe id="preview" title="Invoice preview" src="/admin/templates/{{ tpl.id }}/preview"></iframe>
+  </div>
+</div>
+{% endblock %}
+{% block scripts %}
+<script>
+(() => {
+  const form = document.getElementById("tpl-form");
+  const frame = document.getElementById("preview");
+  const text = document.getElementById("f-accent");
+  const picker = document.getElementById("f-accent-picker");
+  const base = "/admin/templates/{{ tpl.id }}/preview";
+  let timer;
+  function refresh() {
+    clearTimeout(timer);
+    timer = setTimeout(() => {
+      const params = new URLSearchParams();
+      for (const [k, v] of new FormData(form)) if (k !== "csrf" && k !== "name") params.append(k, v);
+      params.set("live", "1");
+      frame.src = base + "?" + params.toString();
+    }, 250);
+  }
+  function setColor(c) { text.value = c.toUpperCase(); picker.value = c; refresh(); }
+  picker.addEventListener("input", () => setColor(picker.value));
+  text.addEventListener("input", () => { if (/^#[0-9a-fA-F]{6}$/.test(text.value)) picker.value = text.value; });
+  document.querySelectorAll(".swatch").forEach(b => b.addEventListener("click", () => setColor(b.dataset.color)));
+  form.addEventListener("input", refresh);
+  form.addEventListener("change", refresh);
+})();
+</script>
+{% endblock %}

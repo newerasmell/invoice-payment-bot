@@ -1,0 +1,20 @@
+{% macro field(name, label, value, errors, type="text", hint="", cls="", required=false, attrs="") %}
+<div class="field {{ cls }} {{ 'has-error' if errors.get(name) }}">
+  <label for="f-{{ name }}">{{ label }}{% if required %} *{% endif %}</label>
+  {% if type == "textarea" %}
+  <textarea id="f-{{ name }}" name="{{ name }}" {{ attrs | safe }}>{{ value if value is not none else "" }}</textarea>
+  {% else %}
+  <input id="f-{{ name }}" type="{{ type }}" name="{{ name }}" value="{{ value if value is not none else "" }}" {{ 'required' if required }} {{ attrs | safe }}>
+  {% endif %}
+  {% if errors.get(name) %}<div class="error">{{ errors[name] }}</div>{% elif hint %}<div class="hint">{{ hint }}</div>{% endif %}
+</div>
+{% endmacro %}
+
+{% macro csrf_input(csrf) %}<input type="hidden" name="csrf" value="{{ csrf }}">{% endmacro %}
+
+{% macro post_button(action, label, csrf, cls="btn secondary small", confirm="") %}
+<form class="inline" method="post" action="{{ action }}" {% if confirm %}onsubmit="return confirm({{ confirm | tojson }})"{% endif %}>
+  <input type="hidden" name="csrf" value="{{ csrf }}">
+  <button class="{{ cls }}" type="submit">{{ label }}</button>
+</form>
+{% endmacro %}

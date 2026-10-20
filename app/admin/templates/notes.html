@@ -1,0 +1,53 @@
+{% extends "base.html" %}
+{% from "_macros.html" import csrf_input, post_button %}
+{% set section = "notes" %}
+{% block title %}Note presets{% endblock %}
+{% block content %}
+<h1>Note presets</h1>
+<p class="sub">Reusable invoice notes, picked from a list instead of typed each time.</p>
+{% if errors %}<div class="alert">Please fill in the title and the text.</div>{% endif %}
+<div class="panel">
+  {% if notes %}
+  <table class="list">
+    <thead><tr><th style="width:22%">Title</th><th>Text</th><th style="width:14%">Company</th><th style="width:150px"></th></tr></thead>
+    <tbody>
+    {% for n in notes %}
+    <tr>
+      <td><b>{{ n.title }}</b></td>
+      <td style="white-space:pre-line">{{ n.text }}</td>
+      <td>{% if n.company_id %}<span class="badge">{{ by_id[n.company_id].code }}</span>{% else %}<span class="muted">All</span>{% endif %}</td>
+      <td class="actions" style="justify-content:flex-end">
+        <a class="btn secondary small" href="#edit-{{ n.id }}" onclick="document.getElementById('edit-{{ n.id }}').hidden=false;return false">Edit</a>
+        {{ post_button("/admin/notes/%d/delete" % n.id, "Delete", csrf, "btn danger small", "Delete this note?") }}
+      </td>
+    </tr>
+    <tr id="edit-{{ n.id }}" {{ 'hidden' if edit != n.id | string }}>
+      <td colspan="4">{{ note_form(n, n.id) }}</td>
+    </tr>
+    {% endfor %}
+    </tbody>
+  </table>
+  {% else %}<div class="empty">No presets yet.</div>{% endif %}
+</div>
+<div class="panel">
+  <h2>New preset</h2>
+  {{ note_form(none, "") }}
+</div>
+{% endblock %}
+
+{% macro note_form(n, nid) %}
+{% set use_values = edit == nid | string and values %}
+<form method="post" action="/admin/notes" class="form-grid">
+  {{ csrf_input(csrf) }}
+  <input type="hidden" name="id" value="{{ nid }}">
+  <div class="field"><label>Title</label><input type="text" name="title" value="{{ values.title if use_values else (n.title if n else '') }}"></div>
+  <div class="field"><label>Company</label>
+    <select name="company_id">
+      <option value="">All companies</option>
+      {% for c in companies %}<option value="{{ c.id }}" {{ 'selected' if n and n.company_id == c.id }}>{{ c.code }} - {{ c.name }}</option>{% endfor %}
+    </select>
+  </div>
+  <div class="field full"><label>Text</label><textarea name="text">{{ values.text if use_values else (n.text if n else '') }}</textarea></div>
+  <div class="full"><button class="btn small" type="submit">{{ "Save" if n else "Add preset" }}</button></div>
+</form>
+{% endmacro %}

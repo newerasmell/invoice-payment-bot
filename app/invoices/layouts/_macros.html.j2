@@ -1,0 +1,88 @@
+{# Building blocks shared by all layouts. Import with: {% from "_macros.html.j2" import ... with context %} #}
+{% macro party(label, p) %}
+<div class="party">
+  <div class="label">{{ label }}</div>
+  <div class="party-name">{{ p.name }}</div>
+  {% if p.address %}<div>{{ p.address }}</div>{% endif %}
+  {% if p.city or p.country %}<div>{{ [p.city, p.country] | select | join(", ") }}</div>{% endif %}
+  {% if p.eik %}<div><span class="muted">Company ID:</span> {{ p.eik }}</div>{% endif %}
+  {% if p.vat_id %}<div><span class="muted">VAT No:</span> {{ p.vat_id }}</div>{% endif %}
+  {% if p.manager %}<div><span class="muted">Represented by:</span> {{ p.manager }}</div>{% endif %}
+</div>
+{% endmacro %}
+
+{% macro meta() %}
+<table class="meta">
+  <tr><th>Invoice No</th><td>{{ inv.number }}</td></tr>
+  <tr><th>Issue date</th><td>{{ inv.issue_date | date }}</td></tr>
+  {% if o.show_due_date and inv.due_date %}<tr><th>Due date</th><td>{{ inv.due_date | date }}</td></tr>{% endif %}
+  <tr><th>Currency</th><td>{{ inv.currency }}</td></tr>
+</table>
+{% endmacro %}
+
+{% macro lines() %}
+<table class="lines">
+  <thead>
+    <tr>
+      {% if o.show_line_numbers %}<th class="num">#</th>{% endif %}
+      <th>Description</th>
+      <th class="r">Qty</th>
+      <th class="r">Unit price</th>
+      <th class="r">Amount</th>
+    </tr>
+  </thead>
+  <tbody>
+    {% for l in inv.lines %}
+    <tr>
+      {% if o.show_line_numbers %}<td class="num">{{ loop.index }}</td>{% endif %}
+      <td>{{ l.description }}</td>
+      <td class="r">{{ l.quantity | qty }}{% if l.unit %} {{ l.unit }}{% endif %}</td>
+      <td class="r">{{ l.unit_price | money }}</td>
+      <td class="r">{{ l.amount | money }}</td>
+    </tr>
+    {% endfor %}
+  </tbody>
+</table>
+{% endmacro %}
+
+{% macro totals() %}
+<table class="totals">
+  {% if o.show_vat_breakdown %}
+  <tr><th>Taxable amount</th><td>{{ inv.net | money }} {{ inv.currency }}</td></tr>
+  <tr><th>VAT {{ inv.vat_rate | qty }}%</th><td>{{ inv.vat | money }} {{ inv.currency }}</td></tr>
+  {% endif %}
+  <tr class="grand"><th>Total due</th><td>{{ inv.gross | money }} {{ inv.currency }}</td></tr>
+</table>
+{% if inv.vat_rate == 0 and inv.no_vat_note %}<p class="vat-note">{{ inv.no_vat_note }}</p>{% endif %}
+{% endmacro %}
+
+{% macro bank() %}
+{% if o.show_bank_details and inv.bank %}
+<div class="bank">
+  <div class="label">Payment details</div>
+  <div><span class="muted">IBAN:</span> <span class="mono">{{ inv.bank.iban }}</span></div>
+  {% if inv.bank.bic %}<div><span class="muted">BIC:</span> <span class="mono">{{ inv.bank.bic }}</span></div>{% endif %}
+  {% if inv.bank.bank_name %}<div><span class="muted">Bank:</span> {{ inv.bank.bank_name }}</div>{% endif %}
+  <div><span class="muted">Reference:</span> <span class="mono">{{ inv.number }}</span></div>
+</div>
+{% endif %}
+{% endmacro %}
+
+{% macro notes() %}
+{% if inv.description %}<p class="description"><span class="muted">Basis:</span> {{ inv.description }}</p>{% endif %}
+{% if inv.notes %}<p class="notes">{{ inv.notes }}</p>{% endif %}
+{% endmacro %}
+
+{% macro signature() %}
+{% if o.show_signature %}
+<table class="signatures"><tr>
+  <td><div class="sigline"></div>Issued by: {{ inv.supplier.manager or inv.supplier.name }}</td>
+  <td><div class="sigline"></div>Received by: {{ inv.customer.manager or inv.customer.name }}</td>
+</tr></table>
+{% endif %}
+{% endmacro %}
+
+{% macro logo(cls="logo") %}
+{% if inv.logo_url and o.logo_position != "none" %}<img class="{{ cls }}" src="{{ inv.logo_url }}" alt="">{% endif %}
+{% endmacro %}
+

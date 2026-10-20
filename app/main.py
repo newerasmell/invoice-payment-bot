@@ -1,10 +1,16 @@
 import asyncio
 import logging
+import secrets
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager, suppress
 
-from fastapi import FastAPI
+from fastapi import FastAPI, Request
+from fastapi.responses import PlainTextResponse, RedirectResponse
+from fastapi.staticfiles import StaticFiles
+from starlette.middleware.sessions import SessionMiddleware
 
+from app.admin import routes as admin
+from app.admin.auth import CsrfFailed, LoginRequired
 from app.bank.factory import make_bank_provider
 from app.bot.setup import make_bot, make_dispatcher
 from app.companies import load_companies_file, seed_approvers, seed_companies
@@ -58,6 +64,32 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             await db.dispose()
 
     app = FastAPI(title="Invoice & Payment Bot", lifespan=lifespan)
+    app.state.settings = settings
+
+    if settings.session_secret:
+        session_secret = settings.session_secret.get_secret_value()
+    else:
+        session_secret = secrets.token_urlsafe(32)
+        log.warning("SESSION_SECRET not set; admin sessions will not survive a restart")
+    app.add_middleware(
+        SessionMiddleware,
+        secret_key=session_secret,
+        session_cookie="admin_session",
+        max_age=12 * 3600,
+        same_site="lax",
+        https_only=settings.https_only_cookies,
+    )
+    app.mount("/admin/static", StaticFiles(directory=admin.STATIC_DIR), name="admin-static")
+    app.include_router(admin.public)
+    app.include_router(admin.router)
+
+    @app.exception_handler(LoginRequired)
+    async def _login_required(request: Request, exc: LoginRequired) -> RedirectResponse:
+        return RedirectResponse("/admin/login", status_code=303)
+
+    @app.exception_handler(CsrfFailed)
+    async def _csrf_failed(request: Request, exc: CsrfFailed) -> PlainTextResponse:
+        return PlainTextResponse("Form expired, go back and reload the page.", status_code=400)
 
     @app.get("/health")
     async def health() -> dict[str, object]:

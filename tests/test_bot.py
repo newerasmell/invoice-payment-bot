@@ -26,7 +26,7 @@ async def test_companies_lists_profiles_with_redacted_iban(harness: BotHarness) 
     [reply] = await harness.send("/companies")
     assert "Company X Ltd" in reply and "Company Z Ltd" in reply
     assert "BG**...0001" in reply
-    assert "BG80PAYN00000000000001" not in reply
+    assert "BG86PAYN96611000000001" not in reply
 
 
 async def test_balance(harness: BotHarness) -> None:
@@ -56,12 +56,12 @@ async def test_simulate_incoming_changes_balance_and_audits(harness: BotHarness,
 
 async def test_simulate_outgoing_with_iban(harness: BotHarness, db) -> None:
     [reply] = await harness.send(
-        '/dev_simulate_outgoing Z 300 "Company G Ltd" BG80PAYN00000000000003 payout oct'
+        '/dev_simulate_outgoing Z 300 "Company G Ltd" BG32PAYN96611000000003 payout oct'
     )
     assert "[MOCK] Outgoing" in reply and "payout oct" in reply
     async with db.session() as s:
         row = await s.scalar(select(MockBankTransfer))
-    assert row.beneficiary_account == "BG80PAYN00000000000003"
+    assert row.beneficiary_account == "BG32PAYN96611000000003"
     assert row.payer == "Company Z Ltd"
 
 

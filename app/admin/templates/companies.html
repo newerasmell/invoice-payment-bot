@@ -1,0 +1,30 @@
+{% extends "base.html" %}
+{% set section = "companies" %}
+{% block title %}Companies{% endblock %}
+{% block content %}
+<div class="panel-head">
+  <div>
+    <h1>Companies</h1>
+    <p class="sub">Issuer profiles. Everything printed on an invoice comes from here.</p>
+  </div>
+  <a class="btn" href="/admin/companies/new">+ New company</a>
+</div>
+{% if not companies %}
+<div class="panel empty">No companies yet. Create the first one.</div>
+{% endif %}
+<div class="grid">
+  {% for c in companies %}
+  <a class="card" href="/admin/companies/{{ c.id }}" style="color:inherit;text-decoration:none">
+    <div><span class="code">{{ c.code }}</span><span class="title">{{ c.legal_name or c.name }}</span></div>
+    <div class="muted small">
+      {% if c.eik %}EIK {{ c.eik }}{% endif %}{% if c.eik and c.vat_id %} · {% endif %}{% if c.vat_id %}VAT {{ c.vat_id }}{% endif %}
+      {% if not c.eik and not c.vat_id %}No company ID yet{% endif %}
+    </div>
+    <div class="small">
+      {% for a in c.bank_accounts %}<span class="badge">{{ a.currency }} {{ a.iban | redact_iban }}</span> {% else %}<span class="badge grey">No bank account</span>{% endfor %}
+    </div>
+    <div class="small muted">{{ c.templates | rejectattr("archived") | list | length }} template(s) · next No {{ c.invoice_prefix }}{{ "%010d" | format(c.invoice_next_number) }}</div>
+  </a>
+  {% endfor %}
+</div>
+{% endblock %}

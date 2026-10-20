@@ -1,0 +1,31 @@
+{% extends "base.html" %}
+{% from "_macros.html" import field, csrf_input %}
+{% set section = "companies" %}
+{% set is_new = account.id is none %}
+{% macro v(name) %}{{ values[name] if name in values else (account[name] if account[name] is not none else "") }}{% endmacro %}
+{% block title %}Bank account{% endblock %}
+{% block content %}
+<div class="crumbs"><a href="/admin">Companies</a> / <a href="/admin/companies/{{ company.id }}">{{ company.name }}</a> /</div>
+<h1>{{ "Add bank account" if is_new else account.label }}</h1>
+<p class="sub">The invoice currency picks which account is printed; the default one wins per currency.</p>
+{% if errors %}<div class="alert">Please fix the highlighted fields.</div>{% endif %}
+<form method="post" class="panel" action="{{ '/admin/companies/%d/accounts/new' % company.id if is_new else '/admin/companies/%d/accounts/%d' % (company.id, account.id) }}">
+  {{ csrf_input(csrf) }}
+  <div class="form-grid">
+    {{ field("label", "Label", v("label"), errors, hint='e.g. "EUR - Paynetics"', required=true) }}
+    {{ field("currency", "Currency", v("currency"), errors, attrs='maxlength="3"', required=true) }}
+    {{ field("iban", "IBAN", v("iban"), errors, cls="full", required=true, attrs='class="mono" autocomplete="off"') }}
+    {{ field("bic", "BIC / SWIFT", v("bic"), errors) }}
+    {{ field("bank_name", "Bank name", v("bank_name"), errors) }}
+    {{ field("bank_account_ref", "Bank API account number", v("bank_account_ref"), errors, hint="Paynetics account number, used to watch incoming/outgoing transfers", cls="full") }}
+    <div class="field full">
+      {% set checked = (values.get("is_default") == "on") if values else account.is_default %}
+      <label class="check"><input type="checkbox" name="is_default" {{ 'checked' if checked }}> Default account for this currency</label>
+    </div>
+  </div>
+  <div class="actions" style="margin-top:18px">
+    <button class="btn" type="submit">{{ "Add account" if is_new else "Save account" }}</button>
+    <a class="btn secondary" href="/admin/companies/{{ company.id }}#accounts">Cancel</a>
+  </div>
+</form>
+{% endblock %}

@@ -19,7 +19,7 @@ companies:
     bank_accounts:
       - label: EUR - Paynetics
         currency: EUR
-        iban: BG80PAYN00000000000001
+        iban: BG86PAYN96611000000001
         bic: PAYNBGSF
         bank_name: Paynetics AD
         bank_account_ref: "41411111111"
@@ -44,7 +44,7 @@ companies:
     bank_accounts:
       - label: EUR - Paynetics
         currency: EUR
-        iban: BG80PAYN00000000000002
+        iban: BG59PAYN96611000000002
         bic: PAYNBGSF
         bank_name: Paynetics AD
         bank_account_ref: "41422222222"
@@ -67,6 +67,6 @@ companies:
     bank_accounts:
       - label: EUR
         currency: EUR
-        iban: BG80PAYN00000000000003
+        iban: BG32PAYN96611000000003
         bank_account_ref: "41433333333"
         is_default: true
