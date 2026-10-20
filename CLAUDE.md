@@ -198,6 +198,20 @@ Write pytest tests for: amount math (1.5% rounding), matching logic (HIGH/MEDIUM
   later). Respect DRY_RUN. Note: a bot can only message a Telegram user/group that has started
   the bot or added it. Agents can also just send the link/PDF themselves.
 
+## 10b2. M2 implementation notes
+- Invoice numbers are assigned only in `invoices/service.py::approve` (atomic UPDATE…RETURNING,
+  per-issuer asyncio lock, commit/rollback inside), so rejected drafts or failed PDF renders never
+  leave gaps. Approval freezes issuer/client/bank/template data into `Invoice.snapshot`; issued
+  PDFs are stored under `UPLOADS_DIR/invoices/<code>/` and served by `/i/<public_token>`.
+- Claude (`llm/parser.py`) uses the official `anthropic` SDK with structured output
+  (`output_config.format` json_schema, amounts as strings), effort `low`, server-side
+  `fallbacks: "default"`; it only returns a draft. Issuer/client are resolved in our code; when
+  unclear the bot asks with buttons.
+- PDF: WeasyPrint 70 (needs Pango). It is imported lazily; `/health` → `pdf` shows whether the
+  engine works on the host. Only `file://` and Google Fonts may be fetched (fonts cached).
+- Delivery (`delivery/service.py`) honours DRY_RUN (email → DRY_RUN_EMAIL or log; Telegram →
+  the operator with a `[DRY RUN]` prefix) and records every attempt in `InvoiceDelivery`.
+
 ## 10c. Deployment and migrations
 - Production is a single Render web service from `render.yaml` (Blueprint), SQLite on a
   persistent disk at `/var/data`, no staging. Every push to `main` deploys to production.

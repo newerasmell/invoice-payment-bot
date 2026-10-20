@@ -1,0 +1,37 @@
+{% extends "base.html" %}
+{% set section = "invoices" %}
+{% block title %}Invoices{% endblock %}
+{% block content %}
+<h1>Invoices</h1>
+<p class="sub">Created and approved in Telegram. Client links open the issued PDF without a login.</p>
+<div class="panel">
+  {% if rows %}
+  <table class="list">
+    <thead><tr><th>No</th><th>Issuer → Client</th><th style="text-align:right">Total</th><th>Status</th><th>Dates</th><th></th></tr></thead>
+    <tbody>
+    {% for inv, code, client in rows %}
+    <tr>
+      <td class="mono">{{ inv.number or "draft #%d" % inv.id }}</td>
+      <td><span class="badge">{{ code }}</span> → {{ client }}</td>
+      <td style="text-align:right;white-space:nowrap">{{ "{:,.2f}".format(inv.amount_gross) }} {{ inv.currency }}</td>
+      <td><span class="badge {{ 'ok' if inv.status.value in ('SENT', 'PAID') else ('grey' if inv.status.value == 'CANCELLED' else '') }}">{{ inv.status.value }}</span></td>
+      <td class="small muted">{% if inv.issue_date %}{{ inv.issue_date.strftime("%d.%m.%Y") }}{% endif %}{% if inv.due_date %} → {{ inv.due_date.strftime("%d.%m.%Y") }}{% endif %}</td>
+      <td class="actions" style="justify-content:flex-end">
+        <a class="btn secondary small" href="/admin/invoices/{{ inv.id }}/pdf" target="_blank">PDF</a>
+        {% set url = link(inv) %}{% if url %}<button type="button" class="btn secondary small copy-link" data-url="{{ url }}">Copy client link</button>{% endif %}
+      </td>
+    </tr>
+    {% endfor %}
+    </tbody>
+  </table>
+  {% else %}<div class="empty">No invoices yet. Write to the Telegram bot to create one.</div>{% endif %}
+</div>
+{% endblock %}
+{% block scripts %}
+<script>
+document.querySelectorAll(".copy-link").forEach(b => b.addEventListener("click", async () => {
+  try { await navigator.clipboard.writeText(b.dataset.url); b.textContent = "Copied"; }
+  catch { window.prompt("Copy the client link:", b.dataset.url); }
+}));
+</script>
+{% endblock %}

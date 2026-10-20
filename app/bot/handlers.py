@@ -9,7 +9,7 @@ from aiogram.types import Message
 from app.audit import actor_tg, audit
 from app.bank.base import BankProvider
 from app.bank.mock import MockBankProvider
-from app.bot import texts
+from app.bot import invoice_flow, texts
 from app.companies import default_bank_account, find_company, list_companies
 from app.config import Settings
 from app.db.models import AllowedUser, Company, TransferDirection
@@ -160,10 +160,12 @@ def make_routers(dev_commands: bool) -> list[Router]:
     main.message.register(cmd_help, Command("help"))
     main.message.register(cmd_companies, Command("companies"))
     main.message.register(cmd_balance, Command("balance"))
-    main.message.register(fallback, F.text)
+    fallback_router = Router(name="fallback")
+    fallback_router.message.register(fallback, F.text)
+    routers = [main, invoice_flow.make_router(), fallback_router]
     if not dev_commands:
-        return [main]
+        return routers
     dev = Router(name="dev")
     dev.message.register(cmd_dev_in, Command("dev_simulate_incoming"))
     dev.message.register(cmd_dev_out, Command("dev_simulate_outgoing"))
-    return [dev, main]  # dev first so the main router's text fallback doesn't swallow it
+    return [dev, *routers]  # dev first so the invoice text handler doesn't swallow it

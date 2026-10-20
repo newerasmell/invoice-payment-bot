@@ -346,3 +346,47 @@ def test_iban_checksum() -> None:
     assert iban_is_valid("DE89370400440532013000")
     assert not iban_is_valid("BG80BNBG96611020345679")
     assert not iban_is_valid("not an iban")
+
+
+def test_clients_crud_and_channels(client: TestClient, sync_db: Session) -> None:
+    from app.db.models import Counterparty
+
+    token = login(client)
+    base = {"name": "Client Ltd", "email": "ap@client.example", "channel_email": "on"}
+    r = post(client, "/admin/clients/new", {**base, "email": "nope"}, token)
+    assert r.status_code == 422 and "valid email" in r.text
+    r = post(client, "/admin/clients/new", {**base, "channel_telegram": "on"}, token)
+    assert r.status_code == 422 and "Telegram chat id to deliver" in r.text
+    r = post(client, "/admin/clients/new", {**base, "telegram_chat_id": "abc"}, token)
+    assert r.status_code == 422 and "chat ids are numbers" in r.text
+    r = post(client, "/admin/clients/new", {**base, "iban": "BG80BNBG96611020345679"}, token)
+    assert r.status_code == 422 and "checksum" in r.text
+
+    r = post(
+        client,
+        "/admin/clients/new",
+        {**base, "telegram_chat_id": "-100123", "channel_telegram": "on", "contact_name": "Ana"},
+        token,
+    )
+    assert r.status_code == 303
+    c = sync_db.scalar(select(Counterparty))
+    assert c.delivery_channels == ["email", "telegram"] and c.telegram_chat_id == -100123
+    page = client.get("/admin/clients").text
+    assert "Client Ltd" in page and "Telegram -100123" in page
+
+    r = post(
+        client,
+        f"/admin/clients/{c.id}",
+        {
+            "name": "Client Ltd",
+            "email": "ap@client.example",
+            "channel_email": "on",
+            "archived": "on",
+        },
+        token,
+    )
+    assert r.status_code == 303
+    sync_db.expire_all()
+    c = sync_db.get(Counterparty, c.id)
+    assert c.delivery_channels == ["email"] and c.telegram_chat_id is None and c.archived
+    assert client.get("/admin/invoices").status_code == 200

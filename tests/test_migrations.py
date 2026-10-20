@@ -34,3 +34,46 @@ async def test_upgrade_is_idempotent_on_existing_data(tmp_path: Path) -> None:
     await upgrade_to_head(url)  # a restart must not touch existing rows
     with sqlite3.connect(db) as conn:
         assert conn.execute("SELECT count(*) FROM companies").fetchone() == (1,)
+
+
+async def test_m2_upgrade_with_existing_rows(tmp_path: Path) -> None:
+    """The client/invoice columns added after the first deploy must apply to tables that
+    already hold rows (production had data by then)."""
+    from alembic import command
+
+    from app.db.migrate import alembic_config
+
+    db = tmp_path / "m.db"
+    url = f"sqlite+aiosqlite:///{db}"
+    cfg = alembic_config(url)
+    import asyncio
+
+    await asyncio.to_thread(command.upgrade, cfg, "317caca0caaf")
+    with sqlite3.connect(db) as conn:
+        conn.execute(
+            "INSERT INTO companies (id, code, name, invoice_prefix, invoice_next_number,"
+            " default_currency, default_vat_rate, default_payment_terms_days, created_at,"
+            " updated_at) VALUES (1, 'X', 'X', '', 1, 'EUR', 20, 14, '2026-10-20', '2026-10-20')"
+        )
+        conn.execute(
+            "INSERT INTO counterparties (id, name, created_at, updated_at)"
+            " VALUES (1, 'Client Ltd', '2026-10-20', '2026-10-20')"
+        )
+        conn.execute(
+            "INSERT INTO invoices (id, issuer_id, counterparty_id, description, amount_net,"
+            " vat_rate, amount_vat, amount_gross, currency, status, source, created_at,"
+            " updated_at) VALUES (1, 1, 1, '', 10000, 20, 2000, 12000, 'EUR', 'DRAFT', 'manual',"
+            " '2026-10-20', '2026-10-20')"
+        )
+    await upgrade_to_head(url)
+    with sqlite3.connect(db) as conn:
+        assert conn.execute(
+            "SELECT archived, delivery_channels FROM counterparties"
+        ).fetchone() == (
+            0,
+            None,
+        )
+        assert conn.execute("SELECT public_token, amount_gross FROM invoices").fetchone() == (
+            None,
+            12000,
+        )

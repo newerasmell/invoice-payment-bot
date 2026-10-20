@@ -189,7 +189,14 @@ class InvoiceTemplate(Timestamped, Base):
     __table_args__ = (UniqueConstraint("company_id", "name"),)
 
 
+class DeliveryChannel(StrEnum):
+    EMAIL = "email"
+    TELEGRAM = "telegram"
+
+
 class Counterparty(Timestamped, Base):
+    """A client profile: what is printed as "Customer" and where invoices are delivered."""
+
     __tablename__ = "counterparties"
 
     id: Mapped[int] = mapped_column(primary_key=True)
@@ -201,6 +208,16 @@ class Counterparty(Timestamped, Base):
     iban: Mapped[str | None] = mapped_column(String(64))
     # Set when this counterparty is one of our own companies (X invoicing Z, etc.).
     company_id: Mapped[int | None] = mapped_column(ForeignKey("companies.id"))
+    city: Mapped[str | None] = mapped_column(String(128))
+    country: Mapped[str | None] = mapped_column(String(64))
+    contact_name: Mapped[str | None] = mapped_column(String(255))
+    phone: Mapped[str | None] = mapped_column(String(64))
+    # Telegram user or group chat id; the bot can only write there after the chat started it.
+    telegram_chat_id: Mapped[int | None] = mapped_column(BigInteger)
+    # Channels used to deliver approved invoices, e.g. ["email", "telegram"].
+    delivery_channels: Mapped[list[str] | None] = mapped_column(JSON)
+    notes: Mapped[str | None] = mapped_column(Text)
+    archived: Mapped[bool] = mapped_column(Boolean, default=False, server_default="0")
 
 
 class Contract(Timestamped, Base):
@@ -244,12 +261,35 @@ class Invoice(Timestamped, Base):
     )
     related_transfer_id: Mapped[int | None] = mapped_column(ForeignKey("bank_transfers.id"))
     send_idempotency_key: Mapped[str | None] = mapped_column(String(64), unique=True)
+    # Unguessable token for the public invoice link (/i/<token>), set on approval.
+    public_token: Mapped[str | None] = mapped_column(String(64), index=True, unique=True)
+    # Issuer/customer/bank data frozen at approval, so later profile edits never change it.
+    snapshot: Mapped[dict[str, Any] | None] = mapped_column(JSON)
+    created_by: Mapped[int | None] = mapped_column(BigInteger)  # telegram id
+    approved_by: Mapped[int | None] = mapped_column(BigInteger)
+    approved_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    sent_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
 
     __table_args__ = (UniqueConstraint("issuer_id", "number"),)
 
     lines: Mapped[list["InvoiceLine"]] = relationship(
         back_populates="invoice", order_by="InvoiceLine.position", cascade="all, delete-orphan"
     )
+
+
+class InvoiceDelivery(Base):
+    """One attempt to deliver an invoice to a client over one channel."""
+
+    __tablename__ = "invoice_deliveries"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    invoice_id: Mapped[int] = mapped_column(ForeignKey("invoices.id"))
+    channel: Mapped[str] = mapped_column(String(16))
+    recipient: Mapped[str] = mapped_column(String(255))
+    status: Mapped[str] = mapped_column(String(16))  # sent | dry_run | failed | skipped
+    detail: Mapped[str | None] = mapped_column(Text)
+    actor: Mapped[str] = mapped_column(String(64))
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
 
 
 class InvoiceLine(Base):

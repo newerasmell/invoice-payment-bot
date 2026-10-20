@@ -1,0 +1,54 @@
+{% extends "base.html" %}
+{% from "_macros.html" import field, csrf_input %}
+{% set section = "clients" %}
+{% set is_new = client.id is none %}
+{% macro v(name) %}{{ values[name] if name in values else (client[name] if client[name] is not none else "") }}{% endmacro %}
+{% macro checked(ch) %}{% if values %}{{ 'checked' if values.get('channel_' ~ ch) == 'on' }}{% else %}{{ 'checked' if ch in (client.delivery_channels or []) }}{% endif %}{% endmacro %}
+{% block title %}{{ "New client" if is_new else client.name }}{% endblock %}
+{% block content %}
+<div class="crumbs"><a href="/admin/clients">Clients</a> /</div>
+<h1>{{ "New client" if is_new else client.name }}</h1>
+<p class="sub">Printed as the customer on invoices; the channels below receive approved invoices.</p>
+{% if errors %}<div class="alert">Please fix the highlighted fields.</div>{% endif %}
+<form method="post" class="panel" action="{{ '/admin/clients/new' if is_new else '/admin/clients/%d' % client.id }}">
+  {{ csrf_input(csrf) }}
+  <h2>Company details</h2>
+  <div class="form-grid">
+    {{ field("name", "Legal name", v("name"), errors, required=true, cls="full", hint="As printed on invoices") }}
+    {{ field("eik", "Company ID (EIK)", v("eik"), errors) }}
+    {{ field("vat_id", "VAT number", v("vat_id"), errors) }}
+    {{ field("address", "Address", v("address"), errors, cls="full") }}
+    {{ field("city", "City", v("city"), errors) }}
+    {{ field("country", "Country", v("country"), errors) }}
+    {{ field("contact_name", "Contact person", v("contact_name"), errors, hint="Used in the greeting and printed as “Represented by”") }}
+    {{ field("phone", "Phone", v("phone"), errors) }}
+    {{ field("iban", "Client IBAN", v("iban"), errors, hint="Optional; helps match their payments later") }}
+    <div class="field">
+      <label for="f-company">This client is one of our companies</label>
+      <select id="f-company" name="company_id">
+        <option value="">No</option>
+        {% for c in companies %}<option value="{{ c.id }}" {{ 'selected' if (values.get('company_id') or (client.company_id|string if client.company_id else '')) == c.id|string }}>{{ c.code }} - {{ c.name }}</option>{% endfor %}
+      </select>
+    </div>
+  </div>
+  <h2 style="margin-top:22px">Delivery</h2>
+  <div class="form-grid">
+    {{ field("email", "Email", v("email"), errors, type="email") }}
+    {{ field("telegram_chat_id", "Telegram chat id", v("telegram_chat_id"), errors, hint="The client (or their group) must first open the bot and press Start, otherwise Telegram blocks the message") }}
+    <div class="field full {{ 'has-error' if errors.get('channel_email') or errors.get('channel_telegram') }}">
+      <label>Send approved invoices by</label>
+      <label class="check"><input type="checkbox" name="channel_email" {{ checked('email') }}> Email (PDF attached)</label>
+      <label class="check"><input type="checkbox" name="channel_telegram" {{ checked('telegram') }}> Telegram (PDF + link)</label>
+      {% for k in ("channel_email", "channel_telegram") %}{% if errors.get(k) %}<div class="error">{{ errors[k] }}</div>{% endif %}{% endfor %}
+    </div>
+    {{ field("notes", "Internal notes", v("notes"), errors, type="textarea", cls="full") }}
+    {% if not is_new %}
+    <div class="field full"><label class="check"><input type="checkbox" name="archived" {{ 'checked' if (values.get('archived') == 'on' if values else client.archived) }}> Archived (hidden from Telegram suggestions)</label></div>
+    {% endif %}
+  </div>
+  <div class="actions" style="margin-top:18px">
+    <button class="btn" type="submit">{{ "Create client" if is_new else "Save client" }}</button>
+    <a class="btn secondary" href="/admin/clients">Cancel</a>
+  </div>
+</form>
+{% endblock %}

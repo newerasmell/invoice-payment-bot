@@ -17,6 +17,8 @@ dependencies = [
     "python-multipart>=0.0.9",
     "itsdangerous>=2.2",
     "alembic>=1.13",
+    "anthropic>=1.0",
+    "weasyprint>=70,<71",
 ]
 
 [project.optional-dependencies]

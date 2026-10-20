@@ -1,0 +1,34 @@
+{% extends "base.html" %}
+{% set section = "clients" %}
+{% block title %}Clients{% endblock %}
+{% block content %}
+<div class="panel-head">
+  <div>
+    <h1>Clients</h1>
+    <p class="sub">Who we invoice, and where approved invoices are delivered.</p>
+  </div>
+  <a class="btn" href="/admin/clients/new">+ New client</a>
+</div>
+<div class="panel">
+  {% if clients %}
+  <table class="list">
+    <thead><tr><th>Name</th><th>Company ID / VAT</th><th>Delivery</th><th></th></tr></thead>
+    <tbody>
+    {% for c in clients %}
+    <tr {% if c.archived %}style="opacity:.55"{% endif %}>
+      <td><a href="/admin/clients/{{ c.id }}"><b>{{ c.name }}</b></a>{% if c.archived %} <span class="badge grey">archived</span>{% endif %}
+        {% if c.contact_name %}<div class="muted small">{{ c.contact_name }}</div>{% endif %}</td>
+      <td class="small">{{ c.eik or "" }}{% if c.eik and c.vat_id %} · {% endif %}{{ c.vat_id or "" }}</td>
+      <td class="small">
+        {% for ch in (c.delivery_channels or []) %}<span class="badge ok">{{ ch }}</span> {% else %}<span class="badge grey">none</span>{% endfor %}
+        {% if c.email %}<div class="muted">{{ c.email }}</div>{% endif %}
+        {% if c.telegram_chat_id %}<div class="muted">Telegram {{ c.telegram_chat_id }}</div>{% endif %}
+      </td>
+      <td style="text-align:right"><a class="btn secondary small" href="/admin/clients/{{ c.id }}">Edit</a></td>
+    </tr>
+    {% endfor %}
+    </tbody>
+  </table>
+  {% else %}<div class="empty">No clients yet. They are also created from Telegram when you invoice someone new.</div>{% endif %}
+</div>
+{% endblock %}

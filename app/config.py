@@ -4,7 +4,7 @@ from functools import lru_cache
 from pathlib import Path
 from typing import Annotated
 
-from pydantic import Field, SecretStr, field_validator
+from pydantic import AliasChoices, Field, SecretStr, field_validator
 from pydantic_settings import BaseSettings, NoDecode, SettingsConfigDict
 
 
@@ -39,6 +39,23 @@ class Settings(BaseSettings):
     uploads_dir: Path = Path("data/uploads")
     # Set true when served over HTTPS (production) so the session cookie is Secure.
     https_only_cookies: bool = False
+
+    # Public URL of this app, used in invoice links. Render sets RENDER_EXTERNAL_URL itself.
+    public_base_url: str | None = Field(
+        default=None, validation_alias=AliasChoices("PUBLIC_BASE_URL", "RENDER_EXTERNAL_URL")
+    )
+
+    # Claude API (free-text invoice parsing only; it never triggers actions)
+    anthropic_api_key: SecretStr | None = None
+    claude_model: str = "claude-sonnet-5-5"
+
+    # Outgoing email (SMTP). Without SMTP_HOST, email deliveries are recorded as skipped.
+    smtp_host: str | None = None
+    smtp_port: int = 587
+    smtp_username: str | None = None
+    smtp_password: SecretStr | None = None
+    smtp_starttls: bool = True
+    smtp_from: str | None = None  # fallback sender when a company has no email_from
 
     # Safety
     dry_run: bool = True

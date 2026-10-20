@@ -9,14 +9,16 @@ from fastapi.responses import PlainTextResponse, RedirectResponse
 from fastapi.staticfiles import StaticFiles
 from starlette.middleware.sessions import SessionMiddleware
 
+from app import public as public_routes
 from app.admin import routes as admin
 from app.admin.auth import CsrfFailed, LoginRequired
 from app.bank.factory import make_bank_provider
-from app.bot.setup import make_bot, make_dispatcher
+from app.bot.setup import BOT_COMMANDS, make_bot, make_dispatcher
 from app.companies import load_companies_file, seed_approvers, seed_companies
 from app.config import Settings, get_settings
 from app.db.migrate import upgrade_to_head
 from app.db.session import Database
+from app.invoices.pdf import pdf_engine_status
 
 log = logging.getLogger("app")
 
@@ -45,7 +47,12 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         if settings.telegram_bot_token:
             bot = make_bot(settings.telegram_bot_token.get_secret_value())
             dp = make_dispatcher(settings, db, bank)
+            try:
+                await bot.set_my_commands(BOT_COMMANDS)
+            except Exception:  # the menu is cosmetic; never block startup on it
+                log.warning("could not set the Telegram command menu", exc_info=True)
             polling = asyncio.create_task(dp.start_polling(bot, handle_signals=False))
+            app.state.bot = bot
             log.info(
                 "telegram bot polling started (dry_run=%s, bank=%s)",
                 settings.dry_run,
@@ -83,6 +90,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     app.mount("/admin/static", StaticFiles(directory=admin.STATIC_DIR), name="admin-static")
     app.include_router(admin.public)
     app.include_router(admin.router)
+    app.include_router(public_routes.router)
 
     @app.exception_handler(LoginRequired)
     async def _login_required(request: Request, exc: LoginRequired) -> RedirectResponse:
@@ -98,7 +106,14 @@ def create_app(settings: Settings | None = None) -> FastAPI:
 
     @app.get("/health")
     async def health() -> dict[str, object]:
-        return {"ok": True, "dry_run": settings.dry_run, "bank": settings.bank_provider.value}
+        return {
+            "ok": True,
+            "dry_run": settings.dry_run,
+            "bank": settings.bank_provider.value,
+            "pdf": pdf_engine_status(),
+            "llm": bool(settings.anthropic_api_key),
+            "email": bool(settings.smtp_host),
+        }
 
     return app
 

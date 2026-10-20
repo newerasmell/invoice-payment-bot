@@ -16,12 +16,17 @@ from app.db.models import Base
 def make_engine(url: str) -> AsyncEngine:
     if url.startswith("sqlite") and ":///" in url and ":memory:" not in url:
         Path(url.split(":///", 1)[1]).parent.mkdir(parents=True, exist_ok=True)
-    engine = create_async_engine(url)
-    if url.startswith("sqlite"):
+    sqlite = url.startswith("sqlite")
+    # Writers wait up to 30 s for the lock instead of failing (e.g. two approvals at once).
+    engine = create_async_engine(url, connect_args={"timeout": 30} if sqlite else {})
+    if sqlite:
 
         @event.listens_for(engine.sync_engine, "connect")
         def _fk_on(dbapi_conn, _):  # noqa: ANN001
             dbapi_conn.execute("PRAGMA foreign_keys=ON")
+            if ":memory:" not in url:
+                # WAL lets readers (admin pages, public links) work while a write is open.
+                dbapi_conn.execute("PRAGMA journal_mode=WAL")
 
     return engine
 

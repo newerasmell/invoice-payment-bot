@@ -41,3 +41,9 @@ services:
         sync: false
       - key: BOOTSTRAP_APPROVER_IDS
         sync: false
+      - key: ANTHROPIC_API_KEY
+        sync: false
+      - key: CLAUDE_MODEL
+        value: claude-sonnet-5-5
+      # Optional, for real email delivery (add in the dashboard when ready):
+      # SMTP_HOST, SMTP_PORT, SMTP_USERNAME, SMTP_PASSWORD, SMTP_FROM, DRY_RUN_EMAIL

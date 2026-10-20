@@ -20,7 +20,15 @@ from app.admin.auth import check_csrf, csrf_token, password_matches, require_adm
 from app.audit import audit
 from app.companies import default_bank_account
 from app.config import Settings
-from app.db.models import Company, CompanyBankAccount, InvoiceTemplate, NotePreset
+from app.db.models import (
+    Company,
+    CompanyBankAccount,
+    Counterparty,
+    Invoice,
+    InvoiceTemplate,
+    NotePreset,
+)
+from app.invoices import service as inv_svc
 from app.invoices.options import FONTS, LAYOUTS, TemplateOptions
 from app.invoices.render import render_invoice_html
 from app.invoices.view import sample_invoice
@@ -662,3 +670,176 @@ async def note_delete(request: Request, note_id: int, session: DB) -> Response:
     audit(session, ACTOR, "note.deleted", f"note:{note_id}", {"title": note.title})
     await session.commit()
     return redirect("/admin/notes", "Note deleted", request)
+
+
+# --- clients ------------------------------------------------------------------------
+
+
+_CLIENT_TEXT = (
+    "name",
+    "eik",
+    "vat_id",
+    "address",
+    "city",
+    "country",
+    "contact_name",
+    "email",
+    "phone",
+    "iban",
+    "notes",
+)
+
+
+def _parse_client(form: FormData, errors: f.FormErrors) -> dict[str, Any]:
+    data: dict[str, Any] = {k: f.text(form, k) for k in _CLIENT_TEXT}
+    if not data["name"]:
+        errors["name"] = "Required"
+    if data["email"] and not f.EMAIL.match(data["email"]):
+        errors["email"] = "Not a valid email address"
+    if data["iban"]:
+        data["iban"] = f.iban(data["iban"], errors)
+    chat = f.text(form, "telegram_chat_id")
+    data["telegram_chat_id"] = None
+    if chat:
+        try:
+            data["telegram_chat_id"] = int(chat)
+        except ValueError:
+            errors["telegram_chat_id"] = "Telegram chat ids are numbers, e.g. 123456789 or -100…"
+    channels = [ch for ch in ("email", "telegram") if f.checkbox(form, f"channel_{ch}")]
+    if "email" in channels and not data["email"]:
+        errors["channel_email"] = "Add an email address to deliver by email"
+    if "telegram" in channels and data["telegram_chat_id"] is None:
+        errors["channel_telegram"] = "Add a Telegram chat id to deliver by Telegram"
+    data["delivery_channels"] = channels
+    company_raw = f.text(form, "company_id")
+    data["company_id"] = int(company_raw) if company_raw else None
+    data["archived"] = f.checkbox(form, "archived")
+    return data
+
+
+async def _companies(session: AsyncSession) -> list[Company]:
+    return list((await session.scalars(select(Company).order_by(Company.code))).all())
+
+
+@router.get("/clients")
+async def clients_index(request: Request, session: DB) -> Response:
+    items = (
+        await session.scalars(
+            select(Counterparty).order_by(Counterparty.archived, Counterparty.name)
+        )
+    ).all()
+    return render(request, "clients.html", clients=items)
+
+
+@router.get("/clients/new")
+async def client_new(request: Request, session: DB) -> Response:
+    return render(
+        request,
+        "client_form.html",
+        client=Counterparty(delivery_channels=["email"]),
+        values={},
+        errors={},
+        companies=await _companies(session),
+    )
+
+
+@router.post("/clients/new")
+async def client_create(request: Request, session: DB) -> Response:
+    form = await posted(request)
+    errors = f.FormErrors()
+    data = _parse_client(form, errors)
+    if errors:
+        return render(
+            request,
+            "client_form.html",
+            422,
+            client=Counterparty(),
+            values=dict(form),
+            errors=errors,
+            companies=await _companies(session),
+        )
+    client = Counterparty(**data)
+    session.add(client)
+    await session.flush()
+    audit(session, ACTOR, "client.created", f"client:{client.id}", {"name": client.name})
+    await session.commit()
+    return redirect(f"/admin/clients/{client.id}", "Client created", request)
+
+
+@router.get("/clients/{client_id}")
+async def client_edit(request: Request, client_id: int, session: DB) -> Response:
+    client = await session.get(Counterparty, client_id)
+    if client is None:
+        raise HTTPException(404, "Client not found")
+    return render(
+        request,
+        "client_form.html",
+        client=client,
+        values={},
+        errors={},
+        companies=await _companies(session),
+    )
+
+
+@router.post("/clients/{client_id}")
+async def client_update(request: Request, client_id: int, session: DB) -> Response:
+    client = await session.get(Counterparty, client_id)
+    if client is None:
+        raise HTTPException(404, "Client not found")
+    form = await posted(request)
+    errors = f.FormErrors()
+    data = _parse_client(form, errors)
+    if errors:
+        return render(
+            request,
+            "client_form.html",
+            422,
+            client=client,
+            values=dict(form),
+            errors=errors,
+            companies=await _companies(session),
+        )
+    changed = {k: str(v) for k, v in data.items() if getattr(client, k) != v}
+    for k, v in data.items():
+        setattr(client, k, v)
+    audit(session, ACTOR, "client.updated", f"client:{client.id}", changed)
+    await session.commit()
+    return redirect(f"/admin/clients/{client.id}", "Client saved", request)
+
+
+# --- invoices -----------------------------------------------------------------------
+
+
+@router.get("/invoices")
+async def invoices_index(request: Request, session: DB) -> Response:
+    rows = (
+        await session.execute(
+            select(Invoice, Company.code, Counterparty.name)
+            .join(Company, Company.id == Invoice.issuer_id)
+            .join(Counterparty, Counterparty.id == Invoice.counterparty_id)
+            .order_by(Invoice.id.desc())
+            .limit(200)
+        )
+    ).all()
+    settings: Settings = request.app.state.settings
+    return render(
+        request, "invoices.html", rows=rows, link=lambda inv: inv_svc.public_url(settings, inv)
+    )
+
+
+@router.get("/invoices/{invoice_id}/pdf")
+async def invoice_pdf(invoice_id: int, session: DB) -> Response:
+    try:
+        b = await inv_svc.load_bundle(session, invoice_id)
+        pdf = (
+            await inv_svc.stored_pdf(session, b)
+            if b.invoice.number
+            else await inv_svc.render_bundle_pdf(session, b)
+        )
+    except inv_svc.InvoiceError as e:
+        raise HTTPException(404, str(e)) from e
+    return Response(
+        pdf,
+        media_type="application/pdf",
+        headers={"Content-Disposition": f'inline; filename="{inv_svc.pdf_filename(b.invoice)}"'},
+    )

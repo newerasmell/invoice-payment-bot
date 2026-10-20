@@ -11,7 +11,15 @@ from code: transfers are executed by a human in the bank panel. See `CLAUDE.md` 
 - **Admin panel (done):** `/admin` — company profiles, logo upload, bank accounts (IBAN
   checksum), invoice templates per company (3 layouts × colour/font/blocks/notes, duplicate,
   default, archive) with a live preview, note presets.
-- M2 next: invoice drafting (Claude parser), templates → PDF, approve/send flow (dry run).
+- **M2 (done):** invoices from Telegram. Write e.g. *"Invoice Client Ltd 1200 EUR from Z,
+  consulting"* → Claude turns it into a draft (asks with buttons when the company or client is
+  unclear) → draft PDF with **Approve / Edit / Reject** → approval assigns the next number (no
+  gaps), freezes issuer/client/bank data, stores the PDF and creates a secret client link
+  (`/i/<token>`) → **Send to client** delivers by the client's channels (email and/or
+  Telegram). In `DRY_RUN` nothing reaches the client: email goes to `DRY_RUN_EMAIL` or is only
+  logged, Telegram goes to the operator, marked `[DRY RUN]`. Admin panel: **Clients** (profile +
+  delivery channels) and **Invoices** (PDFs, copy client link).
+- Next: public invoice-request form for clients (approved internally), then M3 (Paynetics).
 
 ## Run locally
 
@@ -47,12 +55,18 @@ startup. After changing a model: `alembic revision --autogenerate -m "..."`, rev
 and test it against a database that already has rows (see CLAUDE.md of the sibling project for
 why). `tests/test_migrations.py` fails if models and migrations drift apart.
 
-## Bot commands (M1)
+`/health` reports the PDF engine (`pdf`), whether the Claude key (`llm`) and SMTP (`email`) are
+configured. Only approvers can approve; operators can draft.
+
+## Bot commands
 
 | Command | |
 |---|---|
 | `/start`, `/help` | |
 | `/companies` | company profiles and bank accounts (IBANs redacted) |
+| *any text* | draft an invoice from free text (needs `ANTHROPIC_API_KEY`) |
+| `/invoices` | last 10 invoices, with Send buttons for approved ones |
+| `/cancel` | stop editing a draft |
 | `/balance <company>` | balance of the company's default account |
 | `/dev_simulate_incoming <company> <amount> <payer> [reference]` | mock bank only |
 | `/dev_simulate_outgoing <company> <amount> <beneficiary> [iban] [reference]` | mock bank only |

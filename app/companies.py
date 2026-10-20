@@ -1,3 +1,4 @@
+from decimal import Decimal
 from pathlib import Path
 from typing import Any
 
@@ -47,6 +48,8 @@ async def seed_companies(session: AsyncSession, data: dict[str, Any]) -> list[st
         if await session.scalar(select(Company.id).where(Company.code == code)):
             continue
         company = Company(**{k: v for k, v in spec.items() if k in _COMPANY_FIELDS})
+        if "default_vat_rate" in spec:
+            company.default_vat_rate = Decimal(str(spec["default_vat_rate"]))
         company.code = code
         session.add(company)
         company.bank_accounts = [CompanyBankAccount(**acc) for acc in spec.get("bank_accounts", [])]

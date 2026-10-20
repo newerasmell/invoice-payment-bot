@@ -54,6 +54,7 @@ def percent(form: FormData, key: str, errors: FormErrors) -> Decimal | None:
     return v.quantize(Decimal("0.01"))
 
 
+EMAIL = re.compile(r"^[^@\s]+@[^@\s]+\.[^@\s]+$")
 _CODE = re.compile(r"^[A-Z0-9_-]{1,16}$")
 _CURRENCY = re.compile(r"^[A-Z]{3}$")
 _BIC = re.compile(r"^[A-Z]{6}[A-Z0-9]{2}([A-Z0-9]{3})?$")

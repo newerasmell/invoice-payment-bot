@@ -8,7 +8,7 @@ from aiogram import Bot
 from aiogram.client.session.base import BaseSession
 from aiogram.methods import TelegramMethod
 from aiogram.methods.base import TelegramType
-from aiogram.types import Chat, Message, Update, User
+from aiogram.types import CallbackQuery, Chat, Message, Update, User
 
 from app.bank.mock import MockBankProvider
 from app.bot.setup import make_bot, make_dispatcher
@@ -42,7 +42,7 @@ class FakeTelegramSession(BaseSession):
             date=datetime.now(UTC),
             chat=Chat(id=chat_id, type="private"),
             text=getattr(method, "text", None),
-        )
+        ).as_(bot)
 
     async def stream_content(self, *args: Any, **kwargs: Any):  # pragma: no cover
         raise NotImplementedError
@@ -63,6 +63,8 @@ def settings(tmp_path: Path) -> Settings:
         companies_file=ROOT / "config" / "companies.example.yaml",
         bootstrap_approver_ids=[APPROVER_ID],
         telegram_bot_token="42:TEST",
+        uploads_dir=tmp_path / "uploads",
+        public_base_url="https://bot.example.com",
     )
 
 
@@ -82,16 +84,58 @@ def bank(db: Database) -> MockBankProvider:
     return MockBankProvider(db)
 
 
+class FakeParser:
+    """Stands in for Claude: returns queued drafts and records what it was asked."""
+
+    available = True
+
+    def __init__(self) -> None:
+        self.queue: list = []
+        self.calls: list = []
+
+    async def parse(self, text, ctx):  # noqa: ANN001, ANN201
+        self.calls.append((text, ctx))
+        item = self.queue.pop(0)
+        if isinstance(item, Exception):
+            raise item
+        return item
+
+
 class BotHarness:
     def __init__(self, settings: Settings, db: Database, bank: MockBankProvider) -> None:
         self.session = FakeTelegramSession()
         self.bot = make_bot("42:TEST", session=self.session)
-        self.dp = make_dispatcher(settings, db, bank)
+        self.parser = FakeParser()
+        self.dp = make_dispatcher(settings, db, bank, parser=self.parser)
         self._update_id = 0
 
-    async def send(self, text: str, user_id: int = APPROVER_ID) -> list[str]:
-        """Feed a private text message through the dispatcher; return the bot's replies."""
+    def calls_since(self, before: int) -> list:
+        return self.session.requests[before:]
+
+    async def click(self, data: str, user_id: int = APPROVER_ID, message_id: int = 1) -> list:
+        """Press an inline button; returns every Bot API call it caused."""
         before = len(self.session.requests)
+        self._update_id += 1
+        user = User(id=user_id, is_bot=False, first_name="Tester")
+        msg = Message(
+            message_id=message_id,
+            date=datetime.now(UTC),
+            chat=Chat(id=user_id, type="private"),
+            text="(button message)",
+        )
+        cb = CallbackQuery(
+            id=str(self._update_id), from_user=user, chat_instance="ci", data=data, message=msg
+        )
+        await self.dp.feed_update(self.bot, Update(update_id=self._update_id, callback_query=cb))
+        return self.session.requests[before:]
+
+    async def send(self, text: str, user_id: int = APPROVER_ID) -> list[str]:
+        """Feed a private text message through the dispatcher; return the bot's text replies."""
+        await self.send_raw(text, user_id)
+        return [m.text for m in self.session.requests[self._before :] if hasattr(m, "text")]
+
+    async def send_raw(self, text: str, user_id: int = APPROVER_ID) -> list:
+        before = self._before = len(self.session.requests)
         self._update_id += 1
         user = User(id=user_id, is_bot=False, first_name="Tester")
         msg = Message(
@@ -103,7 +147,7 @@ class BotHarness:
             entities=_command_entities(text),
         )
         await self.dp.feed_update(self.bot, Update(update_id=self._update_id, message=msg))
-        return [m.text for m in self.session.requests[before:] if hasattr(m, "text")]
+        return self.session.requests[before:]
 
 
 def _command_entities(text: str) -> list[dict[str, Any]] | None:
