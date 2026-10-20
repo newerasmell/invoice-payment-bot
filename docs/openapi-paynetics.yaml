@@ -1,0 +1,1966 @@
+openapi: 3.0.0
+info:
+  title: Paynetics
+  description: '<div>This is the official API documentation of Paynetics.</div>'
+  termsOfService: 'https://paynetics.online/pages/terms-of-service'
+  contact:
+    name: 'API Support'
+    url: 'https://paynetics.online/pages/contact-us/customer-support'
+    email: support@paynetics.online
+  license:
+    name: MIT
+    url: 'https://opensource.org/licenses/MIT'
+  version: 1.2.0
+  x-logo:
+    url: 'https://paynetics.online/assets/paynetics/images/logo_light.png'
+    altText: 'Paynetics Logo'
+servers:
+  -
+    url: 'https://api.paynetics.online'
+    description: 'API Documentation'
+paths:
+  '/v1/accounts/{account}':
+    get:
+      tags:
+        - Accounts
+      summary: 'Get Account(s) Balance'
+      description: 'Get account balance for all accounts or specific account'
+      operationId: 7d472acd7e8cb613c34a0bc721b6b6b1
+      parameters:
+        -
+          name: account
+          in: path
+          description: 'Account Balance for Specific Account'
+          allowEmptyValue: true
+          schema:
+            type: integer
+          examples:
+            int:
+              summary: 'An int value.'
+              value: '41411111111'
+        -
+          name: page
+          in: query
+          description: 'Page number'
+          required: false
+          schema:
+            type: integer
+          examples:
+            int:
+              summary: 'An int value.'
+              value: '1'
+      responses:
+        200:
+          description: Success
+          content:
+            application/json:
+              schema:
+                properties:
+                  status:
+                    type: string
+                  data:
+                    properties:
+                      account:
+                        $ref: '#/components/schemas/account'
+                    type: object
+                  pagination:
+                    $ref: '#/components/schemas/pagination'
+                type: object
+        400:
+          description: Error
+          content:
+            application/json:
+              schema:
+                properties:
+                  status:
+                    type: string
+                  message:
+                    properties:
+                      account-balance:
+                        type: string
+                    type: object
+                type: object
+        401:
+          description: Unauthenticated
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/unauthenticated'
+        403:
+          description: Forbidden
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/unauthorized'
+        502:
+          description: 'Upstream service unavailable'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/badGateway'
+      x-codeSamples:
+        -
+          lang: PHP
+          source: "// Get all Accounts Balance\n$ch = curl_init();\n\ncurl_setopt($ch, CURLOPT_URL, 'https://api.paynetics.online/v1/accounts');\ncurl_setopt($ch, CURLOPT_HTTPHEADER, array(\n    'Access-Token: <your-api-token>',\n    'Secret-Key: <your-api-secret>',\n));\n\ncurl_setopt($ch, CURLOPT_RETURNTRANSFER, 1);\n\n$output = curl_exec($ch);\n\ncurl_close($ch);\n\n\n// Get Specific Account Balance\n$ch = curl_init();\n\ncurl_setopt($ch, CURLOPT_URL, 'https://api.paynetics.online/v1/accounts/41411111111');\ncurl_setopt($ch, CURLOPT_HTTPHEADER, array(\n    'Access-Token: <your-api-token>',\n    'Secret-Key: <your-api-secret>',\n));\n\ncurl_setopt($ch, CURLOPT_RETURNTRANSFER, 1);\n\n$output = curl_exec($ch);\n\ncurl_close($ch);"
+  /v1/register:
+    post:
+      tags:
+        - Registration
+      summary: 'Create New Business Profile'
+      description: 'Create a new business profile so you can start using Paynetics services'
+      operationId: 1035296de276cfc62c56dae0493020d8
+      parameters:
+        -
+          name: type
+          in: query
+          description: 'Account Type'
+          required: true
+          schema:
+            type: string
+            enum:
+              - business
+          examples:
+            string:
+              summary: 'A string value.'
+              value: business
+        -
+          name: firstname
+          in: query
+          description: 'First Name of the Account User'
+          required: true
+          schema:
+            type: string
+          examples:
+            string:
+              summary: 'A string value.'
+              value: John
+        -
+          name: lastname
+          in: query
+          description: 'Last Name of the Account User'
+          required: true
+          schema:
+            type: string
+          examples:
+            string:
+              summary: 'A string value.'
+              value: Smith
+        -
+          name: email
+          in: query
+          description: 'Email Address of the Account User'
+          required: true
+          schema:
+            type: string
+          examples:
+            string:
+              summary: 'A string value.'
+              value: john@example.com
+        -
+          name: country
+          in: query
+          description: 'Country of Residence of the Account User (ISO 3166-1 alpha-3 country code)'
+          required: true
+          schema:
+            type: string
+          examples:
+            string:
+              summary: 'A string value.'
+              value: GBR
+        -
+          name: county
+          in: query
+          description: 'County of Residence of the Account User'
+          required: true
+          schema:
+            type: string
+          examples:
+            string:
+              summary: 'A string value.'
+              value: 'Greater London'
+        -
+          name: city
+          in: query
+          description: 'City of Residence of the Account User'
+          required: true
+          schema:
+            type: string
+          examples:
+            string:
+              summary: 'A string value.'
+              value: London
+        -
+          name: address
+          in: query
+          description: 'Address of Residence of the Account User'
+          required: true
+          schema:
+            type: string
+          examples:
+            string:
+              summary: 'A string value.'
+              value: Address
+        -
+          name: zip
+          in: query
+          description: 'Zip Code of Residence of the Account User'
+          required: true
+          schema:
+            type: string
+          examples:
+            string:
+              summary: 'A string value.'
+              value: '1000'
+        -
+          name: phone
+          in: query
+          description: 'Phone Number of the Account User'
+          required: true
+          schema:
+            type: string
+          examples:
+            string:
+              summary: 'A string value.'
+              value: '+1234567890'
+        -
+          name: occupation
+          in: query
+          description: 'Occupation of the Account User (required for personal accounts)'
+          required: true
+          schema:
+            type: string
+            enum:
+              - 'Occupation unknown'
+              - Accounting/Audit/Finance
+              - 'Public sector/Administration'
+              - Auto/Aviation
+              - Banking/Lending
+              - 'Informational technologies'
+              - PR/Marketing
+              - 'Education/Professional services'
+              - 'Medical services'
+              - Art/Entertainment
+              - Business/Consultancy/Legal
+              - 'Non,governmental organization'
+              - Insurance/Security
+              - Travel/Tourism
+              - Freelance
+              - Manufacturing
+              - Retail/Wholesale
+              - Cryptocurrencies
+              - Construction/Repair
+              - Gaming/Gambling
+          examples:
+            string:
+              summary: 'A string value.'
+              value: 'Occupation unknown'
+        -
+          name: agree
+          in: query
+          description: 'Agree to Terms of Service and Privacy Policy'
+          required: false
+          schema:
+            type: boolean
+            default: true
+          examples:
+            boolean:
+              summary: 'A boolean value.'
+              value: true
+        -
+          name: pep
+          in: query
+          description: 'PEP stands for Politically Exposed Person'
+          required: true
+          schema:
+            type: string
+            enum:
+              - 'Y'
+              - 'N'
+          examples:
+            string:
+              summary: 'A string value.'
+              value: 'N'
+        -
+          name: subscribed
+          in: query
+          description: 'Subscribe to Newsletter'
+          required: false
+          schema:
+            type: string
+            default: '0'
+            enum:
+              - '0'
+              - '1'
+          examples:
+            string:
+              summary: 'A string value.'
+              value: '0'
+        -
+          name: is_director
+          in: query
+          description: 'If true, the main user is also director of the company and does not need any further details'
+          required: false
+          schema:
+            type: boolean
+          examples:
+            boolean:
+              summary: 'A boolean value.'
+              value: true
+        -
+          name: is_owner
+          in: query
+          description: "If true, the main user is also owner of the company and does not need any further details except 'share' field"
+          required: false
+          schema:
+            type: boolean
+          examples:
+            boolean:
+              summary: 'A boolean value.'
+              value: true
+        -
+          name: company_type
+          in: query
+          description: 'Company Type'
+          required: true
+          schema:
+            type: string
+            enum:
+              - SP
+              - LTD
+              - LLP
+              - LP
+              - GP
+              - NPO
+              - INC
+              - TRUST
+          examples:
+            string:
+              summary: 'A string value.'
+              value: LTD
+        -
+          name: name
+          in: query
+          description: 'Company Name'
+          required: true
+          schema:
+            type: string
+          examples:
+            string:
+              summary: 'A string value.'
+              value: 'Company Name'
+        -
+          name: trade_name
+          in: query
+          description: 'Trade Name'
+          required: true
+          schema:
+            type: string
+          examples:
+            string:
+              summary: 'A string value.'
+              value: 'Trade Name'
+        -
+          name: registration_id
+          in: query
+          description: 'Registration ID'
+          required: true
+          schema:
+            type: number
+          examples:
+            number:
+              summary: 'An int value.'
+              value: '123456789'
+        -
+          name: tax_id
+          in: query
+          description: 'Tax ID'
+          required: true
+          schema:
+            type: number
+          examples:
+            number:
+              summary: 'An int value.'
+              value: '123456789'
+        -
+          name: registration_date
+          in: query
+          description: 'Registration Date'
+          required: true
+          schema:
+            type: string
+          examples:
+            string:
+              summary: 'A string value.'
+              value: '2022-10-01'
+        -
+          name: registered_country
+          in: query
+          description: 'Registered Country (ISO 3166-1 alpha-3 country code)'
+          required: true
+          schema:
+            type: string
+          examples:
+            string:
+              summary: 'A string value.'
+              value: GBR
+        -
+          name: registered_city
+          in: query
+          description: 'Registered City'
+          required: true
+          schema:
+            type: string
+          examples:
+            string:
+              summary: 'A string value.'
+              value: London
+        -
+          name: registered_address
+          in: query
+          description: 'Registered Address'
+          required: true
+          schema:
+            type: string
+          examples:
+            string:
+              summary: 'A string value.'
+              value: Address
+        -
+          name: registered_zip
+          in: query
+          description: 'Registered Zip'
+          required: true
+          schema:
+            type: string
+          examples:
+            string:
+              summary: 'A string value.'
+              value: '1000'
+        -
+          name: registered_county
+          in: query
+          description: 'Registered County'
+          required: true
+          schema:
+            type: string
+          examples:
+            string:
+              summary: 'A string value.'
+              value: 'Greater London'
+        -
+          name: website
+          in: query
+          description: Website
+          required: false
+          schema:
+            type: string
+          examples:
+            string:
+              summary: 'A string value.'
+              value: 'https://example.com'
+        -
+          name: range
+          in: query
+          description: 'Range of operation'
+          required: true
+          schema:
+            type: string
+          examples:
+            string:
+              summary: 'A string value.'
+              value: 'Marketing services'
+        -
+          name: industry
+          in: query
+          description: Industry
+          required: true
+          explode: true
+          schema:
+            type: string
+            enum:
+              - Accommodation
+              - 'Account Funding'
+              - 'Accounting and auditing services'
+              - Adult/Entertainment
+              - Advertising
+              - 'Airlines and Air Carriers — not elsewhere classified'
+              - 'Airports and airport terminals'
+              - 'Ambulance Services'
+              - 'Amusement parks, circuses'
+              - Antiques
+              - 'Aquariums and dolphinariums'
+              - 'Architectural, engineering and research'
+              - 'Art Galleries'
+              - 'Athletic Fields / Commercial Sports / Professional Sports Clubs / Sports Promoters'
+              - 'Automobile (Cars) - Parts and Accessories'
+              - 'Ballrooms and studios'
+              - 'Bands, Orchestras, and Miscellaneous Entertainers — not elsewhere classified'
+              - 'Banking / E-Money Institutions / Payment Institutions'
+              - 'Bars, discos, nightclubs'
+              - 'Beauty salons'
+              - 'Beer / Wine / Liquor & Package Stores'
+              - 'Bicycles and service'
+              - 'Billiard / Pool /Darts / Shuffleboards Clubs and Establishments'
+              - 'Book Stores'
+              - 'Books periodicals and newspapers'
+              - 'Bookstores, office and school supplies'
+              - 'Bowling alleys'
+              - 'Bowling and billiard clubs'
+              - 'Bridge and road taxes'
+              - 'Building Materials / Lumber Stores'
+              - 'Bus lines'
+              - 'Business Services — not elsewhere classified'
+              - 'Call centers'
+              - 'Camera Stores (Photographic Equipment and Supplies)'
+              - 'Car / Vehicle Rentals'
+              - 'Car services'
+              - 'Car washes'
+              - 'Carpet cleaning'
+              - Casino
+              - Catering
+              - 'Charities and social services'
+              - 'Child Care Services (Babysitters / Day Care)'
+              - "Children's and baby clothes"
+              - 'Chiropractors / Кinesitherapists'
+              - Cinema
+              - 'Cleaning / Janitorial / Maintenance Services'
+              - 'Clothing and accessories stores'
+              - 'Colleges / Universities / Professional Schools, and Junior Colleges'
+              - 'Commercial photography, art and graphics'
+              - 'Computer equipment and software'
+              - 'Consumer Credit Reporting Agencies'
+              - 'Contractors — Carpentry'
+              - 'Contractors — Concrete / Cement / Asphalt Work'
+              - 'Contractors — Electrical'
+              - 'Contractors — Heating / Plumbing / Air Conditioning'
+              - 'Contractors — not elsewhere classified'
+              - 'Contractors — Roofing / Siding / Sheet Metal Work'
+              - 'Contractors — Tile Setting / Plastering / Insulation / Masonry / Stonework'
+              - 'Contractors—Residential and Commercial'
+              - 'Convenience / Market Stores — Miscellaneous and Specialty Food'
+              - 'Copying services and drawings'
+              - 'Corresponding Schools Distance learning schools'
+              - Cosmetics
+              - 'Courier services and forwarders'
+              - 'Court Costs — including Alimony and Child Support'
+              - 'Craft supplies stores'
+              - 'Crystal / Glassware'
+              - 'Currency Exchange / Cryptocurrency / Money Orders'
+              - 'Dairy products'
+              - Dating
+              - 'Dealers / Brokers'
+              - 'Dental laboratories'
+              - 'Dentists and orthodontists'
+              - 'Department stores'
+              - 'Digital Goods: Applications'
+              - 'Digital Goods: Games'
+              - 'Digital Goods: Media'
+              - 'Direct marketing'
+              - 'Direct Marketing – Outbound Telemarketing Merchants'
+              - 'Direct Marketing – Travel-related arrangement services'
+              - 'Direct Marketing — MLM (Multi-Level) & Other Marketers — not elsewhere classified'
+              - 'Direct Marketing—Continuity/Subscription Merchants'
+              - 'Distance learning schools'
+              - 'Doctors / Surgeons — not elsewhere classified'
+              - 'Drugs, Drug Proprietors, and Druggists Sundries'
+              - 'Dry cleaning'
+              - 'Duty Free'
+              - 'Education Management'
+              - Electronics
+              - 'Employment Agencies, Temporary Help Services'
+              - 'Exterminating / Disinfecting / Fumigation (Pest Control & Termites, Insects, and Rodents Elimination)'
+              - 'Fast Food'
+              - 'Fines / Bail and Bond Payments'
+              - Flooring
+              - Florists
+              - 'Freight carriers'
+              - 'Fuel Stations - Petrol / Diesel / Gas (with or without Ancillary Services)'
+              - 'Furriers and fur'
+              - 'Gambling activities'
+              - 'Games and hobbies'
+              - 'Government Services — not elsewhere classified'
+              - 'Greeting Cards / Gifts / Novelty / Souvenirs'
+              - 'Grocery stores and supermarkets'
+              - Hardware
+              - Hospitals
+              - 'Household appliances'
+              - 'Human Resources'
+              - 'Information Retrieval (Online and Database / Search Services on a contract or fee basis)'
+              - 'Insurance sales, issues and premiums'
+              - 'Investment Management'
+              - 'IT / computer services'
+              - 'Jewelry / Watches / Precious Stones and Metals — Producers (Distributors)'
+              - 'Jewelry, watches and silver'
+              - 'Landscaping and gardening'
+              - 'Large Digital Goods'
+              - 'Laundry services'
+              - 'Legal services and lawyers'
+              - 'Management, consultation and public relations'
+              - Manicurists
+              - 'Massage salons'
+              - 'Medical goods'
+              - 'Miscellaneous and Specialty Retail Stores — not elsewhere classified'
+              - 'Money transfers'
+              - 'Motorcycle & Cars Shops / Dealers (Show Rooms)'
+              - 'Moving, Motor Freight Carriers, Trucking — Local/Long Distance, Local Delivery'
+              - Music
+              - 'Newsstands — Newspapers / Magazines / Journals / Periodicals'
+              - 'Non-Financial Institutions — Currency Exchange / Cryptocurrency / Money Orders / Account Funding'
+              - 'Non-Profit Organizations'
+              - 'Nursing / Eldercare / Personal Care and Convalescent Facilities'
+              - 'Oil trade and oil services'
+              - Optics
+              - 'Optometrists and Ophthalmologists'
+              - Osteopaths
+              - 'Other Services — not elsewhere classified'
+              - 'Parking spaces'
+              - 'Parks for caravans and campsites'
+              - 'Pastries, Nuts and Confectioneries'
+              - Pets
+              - Pharmacies
+              - 'Philatelic and numismatic consumables'
+              - 'Photo studio'
+              - 'Places to eat and restaurants'
+              - 'Plate Making / Typesetting and Related Services'
+              - 'Polishing / Cleaning / Sanitation — Products, Supplies and Preparations'
+              - Pools
+              - 'Ports, maritime services'
+              - 'Postal services'
+              - 'Postal services - government only'
+              - 'Primary and secondary schools'
+              - 'Professional Specialized Services — not elsewhere classified (E.g.: Enterpreneurs / Lecturers / Financial Planners / Researchers / Aution Houses / etc.)'
+              - 'Publishing and printing activities'
+              - Railways
+              - 'Real estate agents and managers'
+              - 'Recreation Services — not elsewhere classified'
+              - 'Religious goods'
+              - 'Rental and Leasing Equipment, Furniture & Tools'
+              - 'Repair of watches and jewelry'
+              - 'Repairs (Reupholstery, Refinishing and Parts) — Appliances'
+              - 'Repairs (Reupholstery, Refinishing and Parts) — Electronics'
+              - 'Repairs (Reupholstery, Refinishing and Parts) — Furniture '
+              - 'Repairs (Reupholstery, Refinishing and Parts) — Miscellaneous (not else where classifield)'
+              - 'Second hand stores'
+              - 'Services and related services'
+              - 'Sewing and embroidery'
+              - 'Shoe repair'
+              - Shoes
+              - 'Spa centers'
+              - 'Specialized home furnishing stores'
+              - 'Spirits and cigarettes'
+              - Sports
+              - 'Sports and entertainment camps'
+              - 'Sports clubs and playgrounds'
+              - 'Steamers and cruise lines'
+              - 'Stenographic and secretarial'
+              - 'Storage warehouses for common use'
+              - 'Streaming Services — Cable TV / Satellite / Internet / Radio'
+              - 'Suburban & Local Commuter Passenger and Ferries Services'
+              - 'Suitcases and leather goods'
+              - 'Tailoring and design services'
+              - 'Tax payments and fines'
+              - 'Taxis and limousine drivers'
+              - 'Telecommunication equipment and telephones'
+              - 'Telegraph services'
+              - 'Ticket agencies'
+              - 'Tire and recycling'
+              - 'Tourist Attractions and Exhibits'
+              - 'Transportation services (Not elsewhere classified)'
+              - 'Travel agencies and tour operators'
+              - Utilities
+              - 'Various goods'
+              - 'Venture Capital / Private Equity'
+              - 'Veterinary services'
+              - 'Video games and halls for arcade entertainment'
+              - 'Vocational and commercial schools'
+              - 'Yachts / Boats / Jet Skis / Powerboats / Sailboats — Rentals and Leases'
+          examples:
+            string:
+              summary: 'A string value.'
+              value: 'Services and related services'
+        -
+          name: operating_difference
+          in: query
+          description: 'Operating Difference (shows if company address is different from registered address)'
+          required: false
+          schema:
+            type: boolean
+          examples:
+            boolean:
+              summary: 'A boolean value.'
+              value: true
+        -
+          name: operating_country
+          in: query
+          description: 'Operating Country (required if Operating Difference is true) (ISO 3166-1 alpha-3 country code)'
+          required: false
+          schema:
+            type: string
+          examples:
+            string:
+              summary: 'A string value.'
+              value: GBR
+        -
+          name: operating_county
+          in: query
+          description: 'Operating County (required if Operating Difference is true)'
+          required: false
+          schema:
+            type: string
+          examples:
+            string:
+              summary: 'A string value.'
+              value: 'Greater London'
+        -
+          name: operating_city
+          in: query
+          description: 'Operating City (required if Operating Difference is true)'
+          required: false
+          schema:
+            type: string
+          examples:
+            string:
+              summary: 'A string value.'
+              value: London
+        -
+          name: operating_address
+          in: query
+          description: 'Operating Address (required if Operating Difference is true)'
+          required: false
+          schema:
+            type: string
+          examples:
+            string:
+              summary: 'A string value.'
+              value: Address
+        -
+          name: operating_zip
+          in: query
+          description: 'Operating Zip (required if Operating Difference is true)'
+          required: false
+          schema:
+            type: string
+          examples:
+            string:
+              summary: 'A string value.'
+              value: '1000'
+        -
+          name: directors
+          in: query
+          description: Directors
+          required: false
+          schema:
+            type: array
+            items:
+              properties:
+                firstname:
+                  type: string
+                lastname:
+                  type: string
+                email:
+                  type: string
+                address:
+                  type: string
+                phone:
+                  type: string
+                zip:
+                  type: string
+                city:
+                  type: string
+                county:
+                  type: string
+                country:
+                  description: 'ISO 3166-1 alpha-3 country code'
+                  type: string
+                pep:
+                  description: 'PEP stands for Politically Exposed Person'
+                  type: string
+                  enum:
+                    - 'Y'
+                    - 'N'
+              type: object
+        -
+          name: owners
+          in: query
+          description: Owners
+          required: false
+          schema:
+            type: array
+            items:
+              properties:
+                firstname:
+                  type: string
+                lastname:
+                  type: string
+                email:
+                  type: string
+                address:
+                  type: string
+                phone:
+                  type: string
+                zip:
+                  type: string
+                city:
+                  type: string
+                county:
+                  type: string
+                country:
+                  description: 'ISO 3166-1 alpha-3 country code'
+                  type: string
+                share:
+                  description: 'Share Percentage (0-100)'
+                  type: number
+                pep:
+                  description: 'PEP stands for Politically Exposed Person'
+                  type: string
+                  enum:
+                    - 'Y'
+                    - 'N'
+              type: object
+      responses:
+        200:
+          description: Success
+          content:
+            application/json:
+              schema:
+                properties:
+                  status:
+                    type: string
+                  message:
+                    properties:
+                      user:
+                        properties:
+                          uuid:
+                            type: string
+                          email:
+                            type: string
+                        type: object
+                      business:
+                        properties:
+                          uuid:
+                            type: string
+                        type: object
+                      set_password_link:
+                        description: 'Link for the new user to set their password. Valid for 24 hours; a new link can be requested through the set-password-link endpoint.'
+                        type: string
+                      set_password_link_expires_at:
+                        description: 'ISO-8601 timestamp when the set-password link expires'
+                        type: string
+                      token:
+                        $ref: '#/components/schemas/token'
+                    type: object
+                type: object
+        400:
+          description: Error
+          content:
+            application/json:
+              schema:
+                properties:
+                  status:
+                    type: string
+                  message:
+                    properties:
+                      register:
+                        type: string
+                    type: object
+                type: object
+        401:
+          description: Unauthenticated
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/unauthenticated'
+        403:
+          description: Forbidden
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/unauthorized'
+      x-codeSamples:
+        -
+          lang: PHP
+          source: "// Create Business Account\n$registerData = array (\n\n    'type'                 => 'business',\n    'firstname'             => 'John',\n    'lastname'              => 'Smith',\n    'email'                 => 'john@example.com',\n    'country'               => 'GBR',\n    'county'                => 'Greater London',\n    'city'                  => 'London',\n    'address'               => 'Address',\n    'zip'                   => '1000',\n    'phone'                 => '+1234567890',\n    'occupation'            => 'Occupation unknown',\n    'agree'                 => true,\n    'subscribed'            => 0,\n    'pep'                   => 'N',\n\n    // If main user is director\n    'is_director' => true,\n\n    // If main user is owner\n    'is_owner' => true,\n\n    // Business Account Parameters\n    'name'                 => 'Company Name',\n    'trade_name'           => 'Trade Name',\n    'registration_id'      => 123456789,\n    'tax_id'               => 123456789,\n    'registration_date'    => '2022-10-01',\n    'registered_country'   => 'GBR',\n    'registered_city'      => 'London',\n    'registered_address'   => 'Address',\n    'registered_zip'       => '1000',\n    'registered_county'    => 'Greater London',\n    'website'              => 'https://example.com',\n    'range'                => 'Marketing services',\n    'industry'             => 'Services and related services',\n    'company_type'         => 'LTD',\n\n    // Directors Parameters\n    'directors' => array (\n        array (\n            'firstname' => 'John',\n            'lastname'  => 'Smith',\n            'email'     => 'john@example.com',\n            'address'   => 'Address',\n            'phone'     => '+1234567890',\n            'zip'       => '1000',\n            'city'      => 'London',\n            'county'    => 'Greater London',\n            'country'   => 'GBR',\n            'pep'       => 'N'\n        )\n    ),\n\n    // Owners Parameters\n    'owners' => array (\n        array (\n            'firstname' => 'John',\n            'lastname'  => 'Smith',\n            'email'     => 'john@example.com',\n            'address'   => 'Address',\n            'phone'     => '+1234567890',\n            'zip'       => '1000',\n            'city'      => 'London',\n            'county'    => 'Greater London',\n            'country'   => 'GBR',\n            'share'     => 100,\n            'pep'       => 'N'\n        )\n    )\n\n);\n\n$ch = curl_init();\n\ncurl_setopt($ch, CURLOPT_URL, 'https://api.paynetics.online/v1/register');\ncurl_setopt($ch, CURLOPT_HTTPHEADER, array(\n    'Access-Token: <your-api-token>',\n    'Secret-Key: <your-api-secret>',\n));\n\ncurl_setopt($ch, CURLOPT_RETURNTRANSFER, 1);\ncurl_setopt($ch, CURLOPT_POST, 1);\ncurl_setopt($ch, CURLOPT_POSTFIELDS, $registerData);\n\n$output = curl_exec($ch);\n\ncurl_close($ch);"
+  /v1/cards:
+    get:
+      tags:
+        - Cards
+      summary: 'Get a list of cards'
+      description: 'Retrieve a list of cards based on filters.'
+      operationId: ebb2619265495e2fde335a77270f4c57
+      parameters:
+        -
+          name: cardType
+          in: query
+          description: 'Filter by card type'
+          required: false
+          schema:
+            type: string
+            enum:
+              - plastic
+              - virtual
+          examples:
+            string:
+              summary: 'Plastic card type'
+              value: plastic
+        -
+          name: cardStatus
+          in: query
+          description: 'Filter by card status'
+          required: false
+          schema:
+            type: string
+            enum:
+              - active
+              - inactive
+          examples:
+            string:
+              summary: 'Active card status'
+              value: active
+        -
+          name: accountId
+          in: query
+          description: 'Filter by account ID'
+          required: false
+          schema:
+            type: integer
+          examples:
+            int:
+              summary: 'An int value.'
+              value: '41411111111'
+        -
+          name: page
+          in: query
+          description: 'Page number for paginated results'
+          required: false
+          schema:
+            type: integer
+            minimum: 1
+          examples:
+            first_page:
+              summary: 'First page'
+              value: '1'
+            second_page:
+              summary: 'Second page'
+              value: '2'
+      responses:
+        200:
+          description: 'Successful response'
+          content:
+            application/json:
+              schema:
+                properties:
+                  data:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/cards'
+                  pagination:
+                    $ref: '#/components/schemas/cardsPagination'
+                type: object
+        404:
+          description: 'No cards found'
+          content:
+            application/json:
+              schema:
+                properties:
+                  status:
+                    type: string
+                    example: error
+                  message:
+                    type: string
+                    example: 'No cards found'
+                type: object
+      x-codeSamples:
+        -
+          lang: PHP
+          source: "// Get cards with filters\n$ch = curl_init();\n\ncurl_setopt($ch, CURLOPT_URL, 'https://api.paynetics.online/v1/cards?cardType=virtual&cardStatus=active');\ncurl_setopt($ch, CURLOPT_HTTPHEADER, array(\n    'Access-Token: <your-api-token>',\n    'Secret-Key: <your-api-secret>',\n));\n\ncurl_setopt($ch, CURLOPT_RETURNTRANSFER, 1);\n\n$output = curl_exec($ch);\n\ncurl_close($ch);\n\n\n// Get cards - page 2\n$ch = curl_init();\n\ncurl_setopt($ch, CURLOPT_URL, 'https://api.paynetics.online/v1/cards?page=2');\ncurl_setopt($ch, CURLOPT_HTTPHEADER, array(\n    'Access-Token: <your-api-token>',\n    'Secret-Key: <your-api-secret>',\n));\n\ncurl_setopt($ch, CURLOPT_RETURNTRANSFER, 1);\n\n$output = curl_exec($ch);\n\ncurl_close($ch);"
+  '/v1/cards/{cardId}':
+    get:
+      tags:
+        - Cards
+      summary: 'Get card details'
+      description: 'Retrieve details of a specific card by its ID.'
+      operationId: af982655b21399c068db4c1d0bc3126c
+      parameters:
+        -
+          name: cardId
+          in: path
+          description: 'ID of the card'
+          required: true
+          schema:
+            type: integer
+          examples:
+            int:
+              summary: 'An int value.'
+              value: '1'
+      responses:
+        200:
+          description: 'Successful response'
+          content:
+            application/json:
+              schema:
+                properties:
+                  data:
+                    $ref: '#/components/schemas/card'
+                type: object
+        404:
+          description: 'Card not found'
+          content:
+            application/json:
+              schema:
+                properties:
+                  success:
+                    type: string
+                    example: error
+                  message:
+                    type: string
+                    example: 'No card found'
+                type: object
+        400:
+          description: Error
+          content:
+            application/json:
+              schema:
+                properties:
+                  success:
+                    type: string
+                    example: error
+                  message:
+                    type: string
+                    example: 'Error getting card details, please contact support'
+                type: object
+      x-codeSamples:
+        -
+          lang: PHP
+          source: "$ch = curl_init();\n\ncurl_setopt($ch, CURLOPT_URL, 'https://api.paynetics.online/v1/cards/1');\ncurl_setopt($ch, CURLOPT_HTTPHEADER, array(\n    'Access-Token: <your-api-token>',\n    'Secret-Key: <your-api-secret>',\n));\n\ncurl_setopt($ch, CURLOPT_RETURNTRANSFER, 1);\n\n$output = curl_exec($ch);\n\ncurl_close($ch);"
+  /v1/rates:
+    get:
+      tags:
+        - 'Exchange Rates'
+      summary: 'Get Exchange Rates'
+      description: "Get exchange rates. When both 'from' and 'to' are omitted, returns all rates (by account and currency pairs). When 'from' and 'to' are provided, returns rate(s) for that pair. Optional 'account' filters by account number."
+      operationId: 554cf7200983aea1f32446aa0257bd26
+      parameters:
+        -
+          name: account
+          in: query
+          description: 'Rates for Specific Account.(optional)'
+          required: false
+          schema:
+            type: integer
+          examples:
+            int:
+              summary: 'An int value.'
+              value: '41411111111'
+        -
+          name: from
+          in: query
+          description: "Currency to convert from (e.g. USD, EUR, GBP). Omit with 'to' to get all rates."
+          required: false
+          schema:
+            type: string
+          examples:
+            string:
+              summary: 'A string value.'
+              value: USD
+        -
+          name: to
+          in: query
+          description: "Currency to convert to. Omit with 'from' to get all rates. When provided, 'from' must also be provided and must differ from 'to'."
+          required: false
+          schema:
+            type: string
+          examples:
+            string:
+              summary: 'A string value.'
+              value: EUR
+        -
+          name: page
+          in: query
+          description: 'Page number'
+          required: false
+          schema:
+            type: integer
+          examples:
+            int:
+              summary: 'An int value.'
+              value: '1'
+      responses:
+        200:
+          description: Success
+          content:
+            application/json:
+              schema:
+                properties:
+                  status:
+                    type: string
+                    example: success
+                  rates:
+                    $ref: '#/components/schemas/rates'
+                  pagination:
+                    $ref: '#/components/schemas/pagination'
+                type: object
+        400:
+          description: Error
+          content:
+            application/json:
+              schema:
+                properties:
+                  status:
+                    type: string
+                    example: error
+                  message:
+                    properties:
+                      exchange-rates:
+                        type: string
+                    type: object
+                type: object
+        401:
+          description: Unauthenticated
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/unauthenticated'
+        403:
+          description: Forbidden
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/unauthorized'
+        502:
+          description: 'Upstream service unavailable'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/badGateway'
+      x-codeSamples:
+        -
+          lang: PHP
+          source: "// Get All Exchange Rates\n$ch = curl_init();\n\ncurl_setopt($ch, CURLOPT_URL, 'https://api.paynetics.online/v1/rates');\ncurl_setopt($ch, CURLOPT_HTTPHEADER, array(\n    'Access-Token: <your-api-token>',\n    'Secret-Key: <your-api-secret>',\n));\n\ncurl_setopt($ch, CURLOPT_RETURNTRANSFER, 1);\n\n$output = curl_exec($ch);\n\ncurl_close($ch);\n\n\n// Get Specific Exchange Rate\n$ch = curl_init();\n\n$params = array(\n    'account'   => '41411111111',\n    'from'  => 'USD',\n    'to'    => 'EUR'\n);\n\ncurl_setopt($ch, CURLOPT_URL, 'https://api.paynetics.online/v1/rates?' . http_build_query($params));\ncurl_setopt($ch, CURLOPT_HTTPHEADER, array(\n    'Access-Token: <your-api-token>',\n    'Secret-Key: <your-api-secret>',\n));\n\ncurl_setopt($ch, CURLOPT_RETURNTRANSFER, 1);\n\n$output = curl_exec($ch);\n\ncurl_close($ch);"
+  /v1/profile:
+    get:
+      tags:
+        - Profile
+      summary: 'Get profile info'
+      description: 'You only need to call this endpoint if you want to obtain your user or business profile data'
+      operationId: 98b81dec1eaa5cc67b625a4e7f041ca8
+      responses:
+        200:
+          description: Success
+          content:
+            application/json:
+              schema:
+                properties:
+                  status:
+                    type: string
+                  data:
+                    properties:
+                      type:
+                        type: string
+                      name:
+                        type: string
+                      registrationNumber:
+                        type: string
+                      companyType:
+                        type: string
+                      industry:
+                        type: string
+                      city:
+                        type: string
+                      address:
+                        type: string
+                      zip:
+                        type: string
+                      country:
+                        type: string
+                      freezeStatus:
+                        type: string
+                    type: object
+                type: object
+        400:
+          description: Error
+          content:
+            application/json:
+              schema:
+                properties:
+                  status:
+                    type: string
+                  message:
+                    properties:
+                      profile:
+                        type: string
+                    type: object
+                type: object
+        401:
+          description: Unauthenticated
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/unauthenticated'
+        403:
+          description: Forbidden
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/unauthorized'
+        502:
+          description: 'Upstream service unavailable'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/badGateway'
+      x-codeSamples:
+        -
+          lang: PHP
+          source: "$ch = curl_init();\n\ncurl_setopt($ch, CURLOPT_URL, 'https://api.paynetics.online/v1/profile');\ncurl_setopt($ch, CURLOPT_HTTPHEADER, array(\n    'Access-Token: <your-api-token>',\n    'Secret-Key: <your-api-secret>',\n));\n\ncurl_setopt($ch, CURLOPT_RETURNTRANSFER, 1);\n\n$output = curl_exec($ch);\n\ncurl_close($ch);"
+  /v1/register/set-password-link:
+    post:
+      tags:
+        - Registration
+      summary: 'Generate a new set-password link for a registered user'
+      description: 'Generates a fresh set-password link for a user previously registered through the register endpoint, identified by uuid. Only available for users registered by the calling API token. Use it when the link returned by the registration has expired.'
+      operationId: 28d10ccf85b5b3d409691e260db1c2d6
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              required:
+                - uuid
+              properties:
+                uuid:
+                  description: 'The uuid of the user, as returned by the register endpoint'
+                  type: string
+                  format: uuid
+              type: object
+      responses:
+        200:
+          description: 'Success, or an error payload passed through from the main application (status=error)'
+          content:
+            application/json:
+              schema:
+                properties:
+                  status:
+                    type: string
+                  message:
+                    properties:
+                      set_password_link:
+                        type: string
+                      set_password_link_expires_at:
+                        description: 'ISO-8601 timestamp'
+                        type: string
+                    type: object
+                type: object
+        422:
+          description: 'Validation failed'
+          content:
+            application/json:
+              schema:
+                properties:
+                  status:
+                    type: string
+                  message:
+                    type: string
+                  errors:
+                    type: object
+                type: object
+      security:
+        -
+          accessToken: []
+          secretKey: []
+  '/v1/statements/{account}/':
+    get:
+      tags:
+        - Accounts
+      summary: 'Get Account Statements'
+      description: 'Get account statement for specified date range. The period between dateStart and dateEnd cannot exceed 1 year.'
+      operationId: a1b0aac14870200100ee7a53a89aa875
+      parameters:
+        -
+          name: account
+          in: path
+          description: 'Statement for the selected Account'
+          required: true
+          schema:
+            type: integer
+          examples:
+            int:
+              summary: 'An int value.'
+              value: '41411111111'
+        -
+          name: dateStart
+          in: query
+          description: 'Statement Start Date (Format: YYYY-MM-DD)'
+          required: true
+          schema:
+            type: string
+          examples:
+            string:
+              summary: 'A string value.'
+              value: '2000-01-01'
+        -
+          name: dateEnd
+          in: query
+          description: 'Statement End Date (Format: YYYY-MM-DD)'
+          required: true
+          schema:
+            type: string
+          examples:
+            string:
+              summary: 'A string value.'
+              value: '2000-01-01'
+        -
+          name: page
+          in: query
+          description: 'Page number'
+          required: false
+          schema:
+            type: integer
+          examples:
+            int:
+              summary: 'An int value.'
+              value: '1'
+      responses:
+        200:
+          description: Success
+          content:
+            application/json:
+              schema:
+                properties:
+                  status:
+                    type: string
+                  statements:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/statements'
+                  totals:
+                    $ref: '#/components/schemas/totals'
+                  pagination:
+                    $ref: '#/components/schemas/pagination'
+                type: object
+        400:
+          description: Error
+          content:
+            application/json:
+              schema:
+                properties:
+                  status:
+                    type: string
+                  message:
+                    properties:
+                      statements:
+                        type: string
+                    type: object
+                type: object
+        401:
+          description: Unauthenticated
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/unauthenticated'
+        403:
+          description: Forbidden
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/unauthorized'
+        502:
+          description: 'Upstream service unavailable'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/badGateway'
+      x-codeSamples:
+        -
+          lang: PHP
+          source: "$ch = curl_init();\n\n$params = array (\n    'dateStart' => '2022-10-01',\n    'dateEnd'   => '2022-10-31'\n);\n\ncurl_setopt($ch, CURLOPT_URL, 'https://api.paynetics.online/v1/statements/41411111111?' . http_build_query($params));\ncurl_setopt($ch, CURLOPT_HTTPHEADER, array(\n    'Access-Token: <your-api-token>',\n    'Secret-Key: <your-api-secret>',\n));\n\ncurl_setopt($ch, CURLOPT_RETURNTRANSFER, 1);\n\n$output = curl_exec($ch);\n\ncurl_close($ch);"
+  /v1/transfers:
+    get:
+      tags:
+        - Transfers
+      summary: 'Get a list of transfers'
+      description: 'Get a list of transfers filtered by type, status, date or amount.'
+      operationId: c113ad4ed552ac5201d542dd33a9124b
+      parameters:
+        -
+          name: type
+          in: query
+          description: 'Transfer type'
+          schema:
+            type: string
+            default: all
+            enum:
+              - all
+              - incoming
+              - outgoing
+              - internal
+          examples:
+            string:
+              summary: 'A string value.'
+              value: all
+        -
+          name: status
+          in: query
+          description: 'Transfer status'
+          schema:
+            type: string
+            default: all
+            enum:
+              - all
+              - new
+              - pending
+              - processed
+              - canceled
+              - reversed
+          examples:
+            string:
+              summary: 'A string value.'
+              value: all
+        -
+          name: date
+          in: query
+          description: 'Filter by transfer date - Format YYYY-MM-DD'
+          required: false
+          schema:
+            type: string
+            example: '2024-01-15'
+        -
+          name: amount
+          in: query
+          description: 'Filter by transfer amount (optional)'
+          required: false
+          schema:
+            type: string
+        -
+          name: page
+          in: query
+          description: 'Page number for pagination'
+          required: false
+          schema:
+            type: integer
+          examples:
+            int:
+              summary: 'An int value.'
+              value: '1'
+      responses:
+        200:
+          description: Success
+          content:
+            application/json:
+              schema:
+                properties:
+                  data:
+                    properties:
+                      status:
+                        type: string
+                        example: success
+                      transfers:
+                        type: array
+                        items:
+                          $ref: '#/components/schemas/transfers'
+                      pagination:
+                        $ref: '#/components/schemas/pagination'
+                    type: object
+                type: object
+        404:
+          description: 'No transfers found'
+          content:
+            application/json:
+              schema:
+                properties:
+                  message:
+                    type: string
+                    example: 'No account found'
+                type: object
+        401:
+          description: Unauthenticated
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/unauthenticated'
+        403:
+          description: Forbidden
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/unauthorized'
+        502:
+          description: 'Upstream service unavailable'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/badGateway'
+      x-codeSamples:
+        -
+          lang: PHP
+          source: "$ch = curl_init();\n\n$params = array (\n    'type'      => 'all',\n    'status'    => 'all',\n    'date'     => '2024-01-15',  // optional, format YYYY-MM-DD\n    'page'     => 1\n);\n\ncurl_setopt($ch, CURLOPT_URL, 'https://api.paynetics.online/v1/transfers?' . http_build_query($params));\ncurl_setopt($ch, CURLOPT_HTTPHEADER, array(\n    'Access-Token: <your-api-token>',\n    'Secret-Key: <your-api-secret>',\n));\n\ncurl_setopt($ch, CURLOPT_RETURNTRANSFER, 1);\n\n$output = curl_exec($ch);\n\ncurl_close($ch);"
+  '/v1/transfers/{transferId}':
+    get:
+      tags:
+        - Transfers
+      summary: 'Get Transfer Details'
+      description: 'Get details of the transfer'
+      operationId: f8e8e0c35e41056ea332a07483b75708
+      parameters:
+        -
+          name: transferId
+          in: path
+          description: 'Id of the transfer.'
+          required: true
+          schema:
+            type: string
+            example: OGOVBD3R7BJV
+      responses:
+        200:
+          description: Success
+          content:
+            application/json:
+              schema:
+                properties:
+                  status:
+                    type: string
+                    example: success
+                  transfer-details:
+                    description: 'Transfer details (array of transfer objects; one element when found by id)'
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/transfers'
+                type: object
+        404:
+          description: 'Transfer not found'
+          content:
+            application/json:
+              schema:
+                properties:
+                  status:
+                    type: string
+                    example: error
+                  message:
+                    properties:
+                      transfer-status:
+                        type: string
+                        example: 'Transfer not found OGOVBD3R7BJV'
+                    type: object
+                type: object
+        401:
+          description: Unauthenticated
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/unauthenticated'
+        403:
+          description: Forbidden
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/unauthorized'
+        502:
+          description: 'Upstream service unavailable'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/badGateway'
+      x-codeSamples:
+        -
+          lang: PHP
+          source: "$ch = curl_init();\n\ncurl_setopt($ch, CURLOPT_URL, 'https://api.paynetics.online/v1/transfers/OGOVBD3R7BJV');\ncurl_setopt($ch, CURLOPT_HTTPHEADER, array(\n    'Access-Token: <your-api-token>',\n    'Secret-Key: <your-api-secret>',\n));\n\ncurl_setopt($ch, CURLOPT_RETURNTRANSFER, 1);\n\n$output = curl_exec($ch);\n\ncurl_close($ch);"
+  /info:
+    get:
+      tags:
+        - Info
+      summary: 'PSD2 API'
+      description: 'Our PSD2 API is aimed for Financially Regulated Third Party Providers who can prove their regulatory status either by being a member of the Open Banking Directory or possessing an eIDAS Certificate.'
+      operationId: b6d4500f77a155ea4c9bb8e0b67687e9
+      responses:
+        200:
+          description: Success
+  /getting-started:
+    get:
+      tags:
+        - 'Getting Started'
+      summary: 'To get started with our PSD2 API you will need to'
+      description: "\n- Browse the available API and find if there is any suitable for your applications\n\n- Use the <a href=\"https://esignature.ec.europa.eu/efda/tl-browser/\" target=\"_blank\" rel=\"noopener noreferrer\">EU Trust Service Browser</a> to find a local qualified trust service provider that can issue QSEAL certificates. You will need it for both developer and production API.\n\n- Test your application on development environment.\n\n- Access Production API.\n\n- If you have any questions please contact us"
+      operationId: 35cbaa0b683eb0c3d67bf743a921aa99
+      responses:
+        200:
+          description: Success
+  /webhook-transfers:
+    post:
+      tags:
+        - 'Transfer Status Webhook'
+      summary: 'Webhook for transfer status change'
+      description: 'Webhooks allow us to push raw events on transfer status change. Batches of events are delivered through a POST request to the defined target URL (Payer and Beneficiary accounts webhook url). Any webhook batch that does not receive an HTTP 200 response will be retried one more time before the data is discarded.'
+      operationId: 6beeb2b19a519ce73470a05294ce212d
+      parameters:
+        -
+          name: body
+          in: query
+          description: 'Payload for transfer status change'
+          required: true
+      responses:
+        200:
+          description: Success
+      x-codeSamples:
+        -
+          lang: JSON
+          source: "{\n    'payer': 'Company name',\n    'amount': '1.00',\n    'currency': 'EUR',\n    'transferId': '2WNJKQHSOCGB',\n    'beneficiary': 'John Smith',\n    'payerAccount': '41411111111',\n    'transferStatus': 'processed',\n    'beneficiaryAccount': 'DE12700111106011111111'\n}"
+  /webhook-sumsub:
+    post:
+      tags:
+        - 'Sumsub Webhook'
+      summary: ' Webhook for Sumsub'
+      description: 'Webhook event for Sumsub applicant status change. Batches of events are delivered through a POST request to the defined target URL. Any webhook batch that does not receive an HTTP 200 response will be retried one more time before the data is discarded.'
+      operationId: bb82367459d2d8d59173db9f9553945e
+      parameters:
+        -
+          name: body
+          in: query
+          description: 'Payload for Sumsub applicant status change'
+          required: true
+      responses:
+        200:
+          description: Success
+      x-codeSamples:
+        -
+          lang: JSON
+          source: "{\n    'applicantId': '111111111111111aaaaaaaaaa'\n    'inspectionId': '11111111111111bbbbbbbbbbb',\n    'applicantType': 'individual',\n    'correlationId': '11111111111111111111111aaaaaaaa',\n    'levelName': 'dev-level-no-selfie',\n    'sandboxMode': true,\n    'externalUserId': '123456ab',\n    'type': 'applicantReviewed',\n    'reviewResult': {\n    'reviewAnswer': 'GREEN' // 'GREEN' | 'RED',\n    'rejectLabels': [ // if reviewAnswer is RED\n        'WRONG_USER_REGION',\n        'REGULATIONS_VIOLATIONS'\n    ],\n    'reviewRejectType': 'FINAL' // if reviewAnswer is RED 'RETRY' | 'FINAL'\n    },\n    'reviewStatus': 'completed',\n    'createdAt': '2024-01-01 15:24:58+0000',\n    'createdAtMs': '2024-01-01 15:24:58.771',\n    'clientId': 'eurocoders.com_1111'\n}"
+components:
+  schemas:
+    Resource: []
+    pagination:
+      properties:
+        current_page:
+          type: number
+        last_page:
+          type: number
+        per_page:
+          type: number
+        total:
+          type: number
+      type: object
+    account:
+      properties:
+        accountNumber:
+          type: string
+        accountName:
+          type: string
+        currency:
+          type: string
+        balance:
+          type: string
+        availableBalance:
+          type: string
+        freezeStatus:
+          type: string
+      type: object
+    statements:
+      properties:
+        debit:
+          type: string
+        credit:
+          type: string
+        currency:
+          type: string
+        paymentDetails:
+          type: string
+        accountHolder:
+          type: string
+        accountNumber:
+          type: string
+        transferId:
+          type: string
+        orderDate:
+          type: string
+        processedDate:
+          type: string
+      type: object
+    totals:
+      properties:
+        startingBalance:
+          type: string
+        closingBalance:
+          type: string
+        totalDebit:
+          type: string
+        totalCredit:
+          type: string
+        statementsTotal:
+          type: string
+        currency:
+          type: string
+        dateStart:
+          type: string
+        dateEnd:
+          type: string
+      type: object
+    transfers:
+      properties:
+        transferId:
+          type: string
+        transferType:
+          type: string
+        payer:
+          type: string
+        payerAccount:
+          type: string
+        beneficiary:
+          type: string
+        beneficiaryAccount:
+          type: string
+        amount:
+          type: string
+        currency:
+          type: string
+        paymentDetails:
+          type: string
+        transferStatus:
+          type: string
+        created:
+          type: string
+        updated:
+          type: string
+      type: object
+    transfer:
+      properties:
+        transferId:
+          type: string
+        transferStatus:
+          type: string
+      type: object
+    cards:
+      properties:
+        id:
+          type: integer
+        created_at:
+          type: string
+        amount_spent:
+          type: number
+          format: float
+        amount_received:
+          type: number
+          format: float
+        masked_pan:
+          type: string
+        program:
+          $ref: '#/components/schemas/program'
+      type: object
+    cardsPagination:
+      properties:
+        meta:
+          properties:
+            current_page:
+              type: integer
+              example: 1
+            from:
+              type: integer
+              example: 1
+            last_page:
+              type: integer
+              example: 3
+            per_page:
+              type: integer
+              example: 15
+            to:
+              type: integer
+              example: 15
+            total:
+              type: integer
+              example: 42
+          type: object
+      type: object
+    program:
+      properties:
+        currency:
+          type: string
+        max_spent:
+          type: number
+          format: float
+      type: object
+    provider:
+      properties:
+        id:
+          type: integer
+        name:
+          type: string
+      type: object
+    card:
+      properties:
+        pan:
+          type: string
+        expiration_month:
+          type: string
+        expiration_year:
+          type: string
+        cvv:
+          type: string
+      type: object
+    client:
+      properties:
+        legalName:
+          type: string
+        registrationId:
+          type: string
+        taxId:
+          type: string
+        profileNumber:
+          type: string
+        registrationDate:
+          type: string
+        companyType:
+          type: string
+        industry:
+          type: string
+        website:
+          type: string
+        range:
+          type: string
+        employeesCount:
+          type: string
+        type:
+          type: string
+      type: object
+    createClient:
+      properties:
+        client:
+          $ref: '#/components/schemas/client'
+        token:
+          $ref: '#/components/schemas/token'
+      type: object
+    token:
+      properties:
+        access-token:
+          type: string
+        secret-key:
+          type: string
+      type: object
+    rates:
+      properties:
+        4141978331599:
+          description: 'Account number (key). Structure: from currency -> to currency -> rate (number)'
+          properties:
+            USD:
+              properties:
+                EUR:
+                  type: number
+                  example: 0.83758
+                GBP:
+                  type: number
+                  example: 0.72336
+                DKK:
+                  type: number
+                  example: 6.25822
+              type: object
+            EUR:
+              properties:
+                USD:
+                  type: number
+                  example: 1.12336
+                GBP:
+                  type: number
+                  example: 0.83772
+                DKK:
+                  type: number
+                  example: 7.24765
+              type: object
+            GBP:
+              properties:
+                USD:
+                  type: number
+                  example: 1.30074
+                EUR:
+                  type: number
+                  example: 1.12316
+                DKK:
+                  type: number
+                  example: 8.39207
+              type: object
+          type: object
+      type: object
+    unauthenticated:
+      properties:
+        message:
+          type: string
+      type: object
+    unauthorized:
+      properties:
+        status:
+          type: string
+          example: Error
+        message:
+          type: string
+      type: object
+    badGateway:
+      properties:
+        message:
+          type: string
+          example: 'An unexpected error occurred'
+      type: object
+  securitySchemes:
+    accessToken:
+      type: apiKey
+      description: 'Add your API Token as header parameter to every request'
+      name: Access-Token
+      in: header
+    secretKey:
+      type: apiKey
+      description: 'Add your API Secret as header parameter to every request'
+      name: Secret-Key
+      in: header
+tags:
+  -
+    name: Cards
+    description: 'Endpoints related to card operations'
+  -
+    name: Authentication
+    description: "## Overview\n\nPaynetics uses a **two-header API key** authentication scheme — no OAuth, no Bearer tokens, no sessions. Every request to the API must include both of the following HTTP headers:\n\n| Header | Description |\n|--------|-------------|\n| Access-Token | Your unique API token identifier |\n| Secret-Key | Your API secret (shown only once at creation) |\n\n**Base URL for all API requests:**\n\nhttps://api.paynetics.online/v1\n\n---\n\n## Prerequisites\n\nBefore you can obtain API credentials, all three of the following must be in place:\n\n1. **Registered business account** — <a href=\"https://paynetics.online\" target=\"_blank\" rel=\"noopener noreferrer\">Sign up at Paynetics</a>\n2. **KYC onboarding completed** — your business account must have status *approved*. KYC approval is handled during onboarding; contact [support@paynetics.online](mailto:support@paynetics.online) if your account is pending.\n3. **Logged in as a master user** — only the *master user* of a business account can view and manage API tokens. Sub-users and team members do not have access to the API Tokens tab.\n\n---\n\n## Step-by-step: getting your credentials\n\n1. Log in to your client panel at <a href=\"https://paynetics.online/profile/api\" target=\"_blank\" rel=\"noopener noreferrer\">https://paynetics.online/profile/api</a>.\n\n2. In the top navigation, click your account menu and select **Settings**.\n3. In the Settings tabs, click **API Tokens**.\n   > ⚠️ This tab is visible **only** to master users of business accounts. If you do not see it, verify you are logged in as the master user.\n4. Click **Create New API Token**.\n5. Fill in the form:\n   - **API Token Name** — a descriptive label for this credential set (e.g. \\`Production integration\\`, \\`Staging tests\\`). Used for identification only.\n   - **Webhook URL** *(optional)* — an HTTPS endpoint that will receive webhook events (transfer status changes, Sumsub KYC updates). You can leave this blank and add it later.\n6. Click **Create**.\n7. The confirmation screen shows your **Access-Token** and **Secret-Key**.\n\n> ⚠️ **Copy your Secret-Key immediately.** It is shown **only once**. Our server stores it as a one-way hash and it cannot be retrieved later. If you lose it, you must revoke this token and create a new one.\n\n---\n\n## Using your credentials in API requests\n\nThe labels in the client panel match the HTTP header names exactly. \nCopy each value from <a href=\"https://paynetics.online/profile/api\" target=\"_blank\" rel=\"noopener noreferrer\">Settings → API Tokens</a> and send it using the same name:\n\n| Client panel label | HTTP header (same name) |\n|--------------------|-------------------------|\n| **Access-Token** | Access-Token |\n| **Secret-Key** | Secret-Key |\n\n> Do **not** use \\`API-Token\\`, \\`Authorization: Bearer\\`, or any other header name — these will all result in \\`401 Unauthorized\\`.\n\n---\n\n## Making your first authenticated request\n\nUse the \\`/v1/profile\\` endpoint to verify your credentials. A successful \\`200 OK\\` response confirms your headers are correct.\n\n**cURL:**\n\n<pre style=\"text-shadow: none; margin: 10px 0;\"><code class=\"language-bash\" style=\"text-shadow: none;\">curl https://api.paynetics.online/v1/profile \\\n  -H \"Access-Token: &lt;your-access-token&gt;\" \\\n  -H \"Secret-Key: &lt;your-secret-key&gt;\"</code></pre>\n\n**PHP (cURL extension):**\n\n<pre style=\"text-shadow: none; margin: 10px 0;\"><code class=\"language-php\" style=\"text-shadow: none;\">$ch = curl_init();\ncurl_setopt($ch, CURLOPT_URL, 'https://api.paynetics.online/v1/profile');\ncurl_setopt($ch, CURLOPT_HTTPHEADER, [\n    'Access-Token: &lt;your-access-token&gt;',\n    'Secret-Key: &lt;your-secret-key&gt;',\n]);\ncurl_setopt($ch, CURLOPT_RETURNTRANSFER, 1);\n$response = curl_exec($ch);\ncurl_close($ch);</code></pre>\n\nA successful response returns \\`HTTP 200\\` with a JSON body containing your account profile. See the **Profile** endpoint in the sidebar for the full response schema.\n\n---\n\n## Troubleshooting authentication errors\n\nAll authentication failures return \\`HTTP 401 Unauthorized\\`. The response body does not include a specific error reason. Use this table to diagnose the cause:\n\n| Cause | How to resolve |\n|-------|----------------|\n| **Header name misspelled** (e.g. sent \\`API-Token\\` instead of \\`Access-Token\\`) | Use exact spelling: \\`Access-Token\\` and \\`Secret-Key\\` — the same names shown in the client panel. |\n| **Headers missing entirely** | Both \\`Access-Token\\` and \\`Secret-Key\\` must be present on every request. |\n| **Access-Token value not recognised** | Re-copy the value from the client panel (Settings → API Tokens). It is 64 characters with no leading or trailing whitespace. |\n| **Secret-Key does not match the token** | Verify you are pairing the secret with its corresponding token (match by token name). If you have lost the secret, revoke the token and create a new one. |\n| **Token has been revoked** | Create a new token in Settings → API Tokens. |\n| **Owner master user is not KYC-approved** | Complete KYC verification in the client panel and retry. |\n| **Business account status is not approved** | Wait for onboarding completion or contact [support@paynetics.online](mailto:support@paynetics.online). |\n\n---\n\n## Managing tokens (revoke, rotate, multiple tokens)\n\n**View existing tokens**\n\nLog in to the <a href=\"https://paynetics.online/profile/api\" target=\"_blank\" rel=\"noopener noreferrer\">client panel</a> and open **Settings → API Tokens**. The list shows all active tokens with their names, creation dates, and webhook URLs.\n\n\n**Revoke a token**\n\nIn the API Tokens list, find the token you want to disable and click the **Revoke** button in the Actions column. Revoked tokens immediately return \\`401\\` on all subsequent requests.\n\n**Rotate credentials (recommended practice)**\n\nThere is no in-place secret regeneration. To rotate:\n\n1. Create a **new** token in Settings → API Tokens.\n2. Update your integration to use the new \\`Access-Token\\` and \\`Secret-Key\\`.\n3. Verify the new credentials work (make a test request to \\`/v1/profile\\`).\n4. Revoke the **old** token.\n\n**Use multiple tokens**\n\nYou can create as many tokens as you need. Recommended:\n\n- Separate tokens for **production** and **staging** environments.\n- Separate tokens per server, service, or team — easier to revoke a single credential without impacting other systems if a secret is compromised.\n\n---\n\n## Best practices and security\n\n- **Protect your Secret Key** — store it in a secrets manager, environment variable, or vault. Never commit it to source control, even in a \\`.env\\` file tracked by git.\n- **HTTPS only** — all requests must use HTTPS. Plain HTTP requests are rejected.\n- **Use separate credential pairs** for staging and production to limit blast radius on credential compromise.\n- **Rotate proactively on suspected exposure**: create a new pair → switch your integration → revoke the old pair.\n- **Webhooks** — if you set a Webhook URL on a token, your endpoint must respond with \\`HTTP 200\\` to every incoming \\`POST\\`. Events that do not receive a \\`200\\` are retried once. See the **Webhooks** section in the sidebar.\n- **Do not share credentials** between different systems or people — create separate tokens with descriptive names for easier audit and revocation."
+  -
+    name: Accounts
+    description: Accounts
+  -
+    name: Registration
+    description: Registration
+  -
+    name: 'Exchange Rates'
+    description: 'Exchange Rates'
+  -
+    name: Profile
+    description: Profile
+  -
+    name: Transfers
+    description: Transfers
+  -
+    name: Info
+    description: Info
+  -
+    name: 'Getting Started'
+    description: 'Getting Started'
+  -
+    name: 'Transfer Status Webhook'
+    description: 'Transfer Status Webhook'
+  -
+    name: 'Sumsub Webhook'
+    description: 'Sumsub Webhook'
+x-tagGroups:
+  -
+    name: ''
+    tags:
+      - Authentication
+  -
+    name: General
+    tags:
+      - Registration
+      - Profile
+      - Accounts
+      - Transfers
+      - 'Exchange Rates'
+      - Clients
+      - Cards
+  -
+    name: 'PSD2 API'
+    tags:
+      - Info
+      - 'Getting Started'
+  -
+    name: Webhooks
+    tags:
+      - 'Transfer Status Webhook'
+      - 'Sumsub Webhook'

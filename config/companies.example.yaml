@@ -1,0 +1,72 @@
+# Initial company profiles. Copy to config/companies.yaml (gitignored) and fill in real data.
+# Seeding is insert-only: a company whose `code` already exists in the DB is left untouched,
+# so later edits made in the app are never overwritten by this file.
+companies:
+  - code: X
+    name: Company X
+    legal_name: Company X Ltd
+    eik: "200000001"
+    vat_id: BG200000001
+    address: 1 Example Street
+    city: Sofia
+    country: Bulgaria
+    manager: Jane Doe
+    email_from: billing@company-x.example
+    invoice_prefix: ""
+    default_currency: EUR
+    default_vat_rate: "20"
+    default_payment_terms_days: 14
+    bank_accounts:
+      - label: EUR - Paynetics
+        currency: EUR
+        iban: BG80PAYN00000000000001
+        bic: PAYNBGSF
+        bank_name: Paynetics AD
+        bank_account_ref: "41411111111"
+        is_default: true
+    templates:
+      - name: Classic
+        layout: classic
+        options: {accent_color: "#1F3A5F", font: Inter}
+
+  - code: Z
+    name: Company Z
+    legal_name: Company Z Ltd
+    eik: "200000002"
+    vat_id: BG200000002
+    address: 2 Example Street
+    city: Sofia
+    country: Bulgaria
+    manager: John Roe
+    email_from: billing@company-z.example
+    default_currency: EUR
+    default_vat_rate: "20"
+    bank_accounts:
+      - label: EUR - Paynetics
+        currency: EUR
+        iban: BG80PAYN00000000000002
+        bic: PAYNBGSF
+        bank_name: Paynetics AD
+        bank_account_ref: "41422222222"
+        is_default: true
+    templates:
+      - name: Classic
+        layout: classic
+        options: {accent_color: "#0F766E", font: Inter}
+
+  - code: G
+    name: Company G
+    legal_name: Company G Ltd
+    eik: "200000003"
+    address: 3 Example Street
+    city: Sofia
+    country: Bulgaria
+    default_currency: EUR
+    default_vat_rate: "0"
+    no_vat_note: "VAT exemption basis: to be confirmed with the accountant."
+    bank_accounts:
+      - label: EUR
+        currency: EUR
+        iban: BG80PAYN00000000000003
+        bank_account_ref: "41433333333"
+        is_default: true
