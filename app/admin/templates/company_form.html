@@ -84,6 +84,45 @@
   {% else %}<div class="empty">No bank accounts yet.</div>{% endif %}
 </div>
 
+<div class="panel" id="bank-api">
+  <div class="panel-head">
+    <h2>Bank API (Paynetics)</h2>
+    <form method="post" action="/admin/companies/{{ company.id }}/bank-test" class="actions">
+      {{ csrf_input(csrf) }}
+      <button class="btn secondary small" type="submit">Test connection</button>
+    </form>
+  </div>
+  <p class="muted small" style="margin-top:0">
+    Read-only access to this company's own Paynetics account, used to detect payments. Set
+    <code>PAYNETICS_{{ company.code | env_code }}_ACCESS_TOKEN</code> and
+    <code>PAYNETICS_{{ company.code | env_code }}_SECRET_KEY</code> in the server environment
+    (Render → Environment). Webhook URL for the API token:
+    <code>{{ request.base_url }}webhooks/paynetics</code>
+  </p>
+  {% if bank_test is defined %}
+    {% if bank_test.error %}
+    <div class="alert">{{ bank_test.error }}</div>
+    {% else %}
+    <div class="flash">Connected{% if bank_test.profile.name %} as <b>{{ bank_test.profile.name }}</b>{% endif %}.</div>
+    {% if bank_test.accounts %}
+    <table class="list">
+      <thead><tr><th>Account number</th><th>Name</th><th style="text-align:right">Balance</th><th>Linked here</th></tr></thead>
+      <tbody>
+      {% for a, linked in bank_test.accounts %}
+      <tr>
+        <td class="mono">{{ a.account }}</td>
+        <td>{{ a.name or "" }}</td>
+        <td style="text-align:right">{{ "{:,.2f}".format(a.balance) }} {{ a.currency }}</td>
+        <td>{% if linked %}<span class="badge ok">yes</span>{% else %}<span class="badge grey">no</span> <span class="muted small">put this number in a bank account's “Bank API account number”</span>{% endif %}</td>
+      </tr>
+      {% endfor %}
+      </tbody>
+    </table>
+    {% else %}<div class="empty">No accounts returned.</div>{% endif %}
+    {% endif %}
+  {% endif %}
+</div>
+
 <div class="panel" id="templates">
   <div class="panel-head">
     <h2>Invoice templates</h2>

@@ -9,12 +9,13 @@ from aiogram.types import Message
 from app.audit import actor_tg, audit
 from app.bank.base import BankProvider
 from app.bank.mock import MockBankProvider
-from app.bot import invoice_flow, texts
+from app.bot import invoice_flow, payments_flow, texts
 from app.companies import default_bank_account, find_company, list_companies
 from app.config import Settings
 from app.db.models import AllowedUser, Company, TransferDirection
 from app.db.session import Database
 from app.money import InvalidAmount, to_money
+from app.payments import sync as psync
 
 log = logging.getLogger(__name__)
 
@@ -127,6 +128,9 @@ async def _simulate(
         )
         await s.commit()
     await message.answer(texts.simulated(transfer))
+    # Same path as a real webhook: re-fetch from the bank, match, notify.
+    events = await psync.sync_one(db, bank, transfer.external_id)
+    await payments_flow.notify(message.bot, db, events)
 
 
 async def cmd_dev_in(
@@ -162,7 +166,7 @@ def make_routers(dev_commands: bool) -> list[Router]:
     main.message.register(cmd_balance, Command("balance"))
     fallback_router = Router(name="fallback")
     fallback_router.message.register(fallback, F.text)
-    routers = [main, invoice_flow.make_router(), fallback_router]
+    routers = [main, payments_flow.make_router(), invoice_flow.make_router(), fallback_router]
     if not dev_commands:
         return routers
     dev = Router(name="dev")

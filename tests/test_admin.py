@@ -1,5 +1,6 @@
 import re
 from collections.abc import Iterator
+from decimal import Decimal
 
 import pytest
 from fastapi.testclient import TestClient
@@ -410,3 +411,48 @@ def test_clients_crud_and_channels(client: TestClient, sync_db: Session) -> None
     c = sync_db.get(Counterparty, c.id)
     assert c.delivery_channels == ["email"] and c.telegram_chat_id is None and c.archived
     assert client.get("/admin/invoices").status_code == 200
+
+
+def test_bank_api_panel(client: TestClient, sync_db: Session, monkeypatch) -> None:  # noqa: ANN001
+    token = login(client)
+    cid = company_id(sync_db, "X")
+    page = client.get(f"/admin/companies/{cid}").text
+    assert "PAYNETICS_X_ACCESS_TOKEN" in page and "webhooks/paynetics" in page
+    r = post(client, f"/admin/companies/{cid}/bank-test", {}, token)
+    assert "No credentials configured" in r.text
+
+    from app.admin import routes
+    from app.bank.base import Balance
+
+    class FakeClient:
+        def __init__(self, *a) -> None:  # noqa: ANN002
+            pass
+
+        async def profile(self) -> dict:
+            return {"name": "Company X Ltd"}
+
+        async def accounts(self) -> list:
+            return [
+                Balance(
+                    account="41411111111",
+                    currency="EUR",
+                    balance=Decimal("10"),
+                    available=Decimal("10"),
+                ),
+                Balance(
+                    account="41499999999",
+                    currency="USD",
+                    balance=Decimal("5"),
+                    available=Decimal("5"),
+                ),
+            ]
+
+        async def aclose(self) -> None:
+            pass
+
+    monkeypatch.setenv("PAYNETICS_X_ACCESS_TOKEN", "tok")
+    monkeypatch.setenv("PAYNETICS_X_SECRET_KEY", "sec")
+    monkeypatch.setattr(routes, "PayneticsClient", FakeClient)
+    html = post(client, f"/admin/companies/{cid}/bank-test", {}, token).text
+    assert "Connected as <b>Company X Ltd</b>" in html
+    assert "41499999999" in html and html.count('badge ok">yes') == 1

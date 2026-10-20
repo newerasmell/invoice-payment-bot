@@ -212,6 +212,18 @@ Write pytest tests for: amount math (1.5% rounding), matching logic (HIGH/MEDIUM
 - Delivery (`delivery/service.py`) honours DRY_RUN (email → DRY_RUN_EMAIL or log; Telegram →
   the operator with a `[DRY RUN]` prefix) and records every attempt in `InvoiceDelivery`.
 
+## 10b3. M3 implementation notes
+- Each company has its own Paynetics account and token: `PAYNETICS_<CODE>_ACCESS_TOKEN` /
+  `_SECRET_KEY` (Settings.paynetics_credentials()). One `PayneticsClient` per company inside
+  `PayneticsProvider`. A transfer between two of our companies appears in both accounts, so
+  `BankTransfer.external_id` is `"<CODE>:<transferId>"` for Paynetics (one row per company's view).
+- `payments/sync.py` is the single path for polling, webhook (always re-fetch) and
+  `/dev_simulate_*`; guarded by a lock; idempotent via `processed_at` + one `PaymentMatch` per
+  transfer. Only HIGH matches are applied automatically.
+- Verified against the live API: invalid keys → `401 {"message":"Unauthenticated."}`. Still
+  unverified until real keys: the `created`/`updated` format and the exact `transferType` values
+  (parser is defensive and infers direction from our account numbers).
+
 ## 10c. Deployment and migrations
 - Production is a single Render web service from `render.yaml` (Blueprint), SQLite on a
   persistent disk at `/var/data`, no staging. Every push to `main` deploys to production.

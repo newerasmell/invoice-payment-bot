@@ -1,11 +1,16 @@
+import os
+import re
 from decimal import Decimal
 from enum import StrEnum
 from functools import lru_cache
 from pathlib import Path
 from typing import Annotated
 
+from dotenv import dotenv_values
 from pydantic import AliasChoices, Field, SecretStr, field_validator
 from pydantic_settings import BaseSettings, NoDecode, SettingsConfigDict
+
+_PAYNETICS_KEY = re.compile(r"^PAYNETICS_([A-Z0-9_]+)_ACCESS_TOKEN$")
 
 
 class BankProviderName(StrEnum):
@@ -28,9 +33,11 @@ class Settings(BaseSettings):
     # Bank
     bank_provider: BankProviderName = BankProviderName.MOCK
     paynetics_base_url: str = "https://api.paynetics.online/v1"
-    paynetics_access_token: SecretStr | None = None
-    paynetics_secret_key: SecretStr | None = None
+    # Credentials are per company (each has its own Paynetics account), read from
+    # PAYNETICS_<CODE>_ACCESS_TOKEN / PAYNETICS_<CODE>_SECRET_KEY; see paynetics_credentials().
     poll_interval_seconds: int = 120
+    poll_lookback_hours: int = 48
+    poll_enabled: bool = True
 
     # Web admin panel (/admin). Disabled while ADMIN_PASSWORD is empty.
     admin_password: SecretStr | None = None
@@ -73,6 +80,26 @@ class Settings(BaseSettings):
         if isinstance(v, int):
             return [v]
         return v
+
+    def paynetics_credentials(self) -> dict[str, tuple[str, str]]:
+        """{COMPANY_CODE: (access_token, secret_key)} from the environment and .env.
+
+        Codes are upper-case; a "-" in a company code is written as "_" in the variable name.
+        """
+        env: dict[str, str] = {}
+        env_file = self.model_config.get("env_file")
+        if env_file and Path(str(env_file)).is_file():
+            env.update({k: v for k, v in dotenv_values(str(env_file)).items() if v})
+        env.update(os.environ)
+        creds: dict[str, tuple[str, str]] = {}
+        for key, token in env.items():
+            m = _PAYNETICS_KEY.match(key)
+            if not m or not token:
+                continue
+            secret = env.get(f"PAYNETICS_{m[1]}_SECRET_KEY")
+            if secret:
+                creds[m[1]] = (token.strip(), secret.strip())
+        return creds
 
     @property
     def dev_commands_enabled(self) -> bool:

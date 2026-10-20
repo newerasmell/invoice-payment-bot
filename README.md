@@ -19,7 +19,25 @@ from code: transfers are executed by a human in the bank panel. See `CLAUDE.md` 
   Telegram). In `DRY_RUN` nothing reaches the client: email goes to `DRY_RUN_EMAIL` or is only
   logged, Telegram goes to the operator, marked `[DRY RUN]`. Admin panel: **Clients** (profile +
   delivery channels) and **Invoices** (PDFs, copy client link).
-- Next: public invoice-request form for clients (approved internally), then M3 (Paynetics).
+- **M3 (done):** read-only Paynetics, one account (and API token) per company. Every
+  `POLL_INTERVAL_SECONDS` the app pulls each company's transfers for the last
+  `POLL_LOOKBACK_HOURS`, caches them, and matches incoming payments to open invoices
+  (invoice number in the payment reason → amount + payer → amount only). Certain matches mark
+  the invoice **PAID** and notify in Telegram; unclear ones ask an approver with buttons.
+  `POST /webhooks/paynetics` is a hint only (the transfer is always re-fetched). `/payments`
+  lists recent transfers. Admin → company → **Bank API → Test connection** shows the
+  company's Paynetics accounts and which are linked.
+- Next: public invoice-request form for clients, M4 rules, M5 payment instructions.
+
+### Connecting Paynetics
+
+1. For each company, in its Paynetics panel (master user): Settings → API Tokens → Create.
+   Webhook URL: `https://<your-app>/webhooks/paynetics`. Copy the Secret-Key (shown once).
+2. In Render → Environment add, per company code (upper case, `-` → `_`):
+   `PAYNETICS_<CODE>_ACCESS_TOKEN` and `PAYNETICS_<CODE>_SECRET_KEY`, then set
+   `BANK_PROVIDER=paynetics`.
+3. Admin → company → Bank API → **Test connection**; put each returned account number into the
+   matching bank account's "Bank API account number".
 
 ## Run locally
 
@@ -66,6 +84,7 @@ configured. Only approvers can approve; operators can draft.
 | `/companies` | company profiles and bank accounts (IBANs redacted) |
 | *any text* | draft an invoice from free text (needs `ANTHROPIC_API_KEY`) |
 | `/invoices` | last 10 invoices, with Send buttons for approved ones |
+| `/payments` | check the bank now and list recent transfers with their match |
 | `/cancel` | stop editing a draft |
 | `/balance <company>` | balance of the company's default account |
 | `/dev_simulate_incoming <company> <amount> <payer> [reference]` | mock bank only |

@@ -35,8 +35,10 @@ services:
         sync: false   # you are asked for it when the Blueprint is created
       - key: DRY_RUN
         value: "true"
+      # Managed in the dashboard (not pinned here, so a Blueprint sync never reverts it):
+      # "mock" until the per-company PAYNETICS_<CODE>_* keys are set, then "paynetics".
       - key: BANK_PROVIDER
-        value: mock
+        sync: false
       - key: TELEGRAM_BOT_TOKEN
         sync: false
       - key: BOOTSTRAP_APPROVER_IDS

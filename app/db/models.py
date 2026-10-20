@@ -330,15 +330,24 @@ class BankTransfer(Timestamped, Base):
     booked_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     raw_json: Mapped[dict[str, Any]] = mapped_column(default=dict)
     processed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    # Which of our companies/accounts the transfer belongs to (resolved at sync time).
+    # Plain column (no FK): adding a FK on SQLite would force a table rebuild in migration 3.
+    company_id: Mapped[int | None] = mapped_column(Integer, index=True)
+    account: Mapped[str | None] = mapped_column(String(64))
 
     __table_args__ = (UniqueConstraint("provider", "external_id"),)
 
 
 class PaymentMatch(Timestamped, Base):
+    """How an incoming transfer was tied to an invoice. One row per transfer; invoice_id is
+    None while waiting for a human decision or when marked as not an invoice payment."""
+
     __tablename__ = "payment_matches"
 
     id: Mapped[int] = mapped_column(primary_key=True)
-    transfer_id: Mapped[int] = mapped_column(ForeignKey("bank_transfers.id"))
+    transfer_id: Mapped[int] = mapped_column(
+        ForeignKey("bank_transfers.id"), index=True, unique=True
+    )
     invoice_id: Mapped[int | None] = mapped_column(ForeignKey("invoices.id"))
     confidence: Mapped[MatchConfidence] = mapped_column(_enum(MatchConfidence))
     method: Mapped[str] = mapped_column(String(64))

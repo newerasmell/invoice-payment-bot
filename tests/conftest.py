@@ -159,3 +159,10 @@ def _command_entities(text: str) -> list[dict[str, Any]] | None:
 @pytest.fixture
 def harness(settings: Settings, db: Database, bank: MockBankProvider) -> BotHarness:
     return BotHarness(settings, db, bank)
+
+
+@pytest.fixture
+def admin_settings_factory(settings: Settings):  # noqa: ANN201
+    """App settings for TestClient-based tests (no Telegram, no background polling)."""
+    s = settings.model_copy(update={"telegram_bot_token": None, "poll_enabled": False})
+    return s, s.database_url

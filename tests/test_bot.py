@@ -39,9 +39,13 @@ async def test_balance(harness: BotHarness) -> None:
 
 
 async def test_simulate_incoming_changes_balance_and_audits(harness: BotHarness, db) -> None:
-    [reply] = await harness.send('/dev_simulate_incoming X 1200,50 "Client Ltd" INV 0000000001')
+    reply, review = await harness.send(
+        '/dev_simulate_incoming X 1200,50 "Client Ltd" INV 0000000001'
+    )
     assert "[MOCK] Incoming" in reply and "1,200.50 EUR" in reply
     assert "Client Ltd" in reply and "INV 0000000001" in reply
+    # No open invoice to match, so the payment goes to a human.
+    assert "Incoming 1,200.50 EUR" in review and "No certain match" in review
 
     [reply] = await harness.send("/balance X")
     expected = MOCK_OPENING_BALANCE + Decimal("1200.50")

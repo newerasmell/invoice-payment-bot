@@ -38,6 +38,7 @@ def _to_transfer(row: MockBankTransfer) -> Transfer:
         beneficiary_account=row.beneficiary_account,
         reference=row.payment_details or None,
         booked_at=created,
+        account=row.account,
         raw={
             "transferId": row.transfer_id,
             "transferType": row.transfer_type.value,

@@ -18,6 +18,8 @@ from starlette.datastructures import FormData, UploadFile
 from app.admin import forms as f
 from app.admin.auth import check_csrf, csrf_token, password_matches, require_admin
 from app.audit import audit
+from app.bank.base import BankError
+from app.bank.paynetics import PayneticsClient
 from app.companies import default_bank_account
 from app.config import Settings
 from app.db.models import (
@@ -44,6 +46,7 @@ templates = Jinja2Templates(directory=Path(__file__).parent / "templates")
 templates.env.filters["redact_iban"] = redact_iban
 templates.env.globals["LAYOUTS"] = LAYOUTS
 templates.env.globals["FONTS"] = FONTS
+templates.env.filters["env_code"] = lambda code: (code or "").upper().replace("-", "_")
 
 public = APIRouter(prefix="/admin")
 router = APIRouter(prefix="/admin", dependencies=[Depends(require_admin)])
@@ -845,4 +848,55 @@ async def invoice_pdf(invoice_id: int, session: DB) -> Response:
         pdf,
         media_type="application/pdf",
         headers={"Content-Disposition": f'inline; filename="{inv_svc.pdf_filename(b.invoice)}"'},
+    )
+
+
+# --- bank API (Paynetics) ---------------------------------------------------------------
+
+
+def _env_code(code: str) -> str:
+    return code.upper().replace("-", "_")
+
+
+@router.post("/companies/{company_id}/bank-test")
+async def company_bank_test(
+    request: Request, company_id: int, session: DB, settings: Cfg
+) -> Response:
+    company = await load_company(session, company_id)
+    await posted(request)
+    creds = settings.paynetics_credentials().get(_env_code(company.code))
+    result: dict[str, Any] = {}
+    if creds is None:
+        result["error"] = "No credentials configured for this company."
+    else:
+        client = PayneticsClient(company.code, settings.paynetics_base_url, *creds)
+        try:
+            profile = await client.profile()
+            accounts = await client.accounts()
+            linked = {a.bank_account_ref for a in company.bank_accounts if a.bank_account_ref}
+            result = {
+                "profile": profile,
+                "accounts": [(a, a.account in linked) for a in accounts],
+            }
+            audit(
+                session,
+                ACTOR,
+                "bank.tested",
+                f"company:{company.id}",
+                {"ok": True, "accounts": len(accounts)},
+            )
+        except BankError as e:
+            result["error"] = str(e)
+            audit(
+                session,
+                ACTOR,
+                "bank.tested",
+                f"company:{company.id}",
+                {"ok": False, "error": str(e)[:200]},
+            )
+        finally:
+            await client.aclose()
+        await session.commit()
+    return render(
+        request, "company_form.html", company=company, values={}, errors={}, bank_test=result
     )

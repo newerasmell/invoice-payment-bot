@@ -10,6 +10,7 @@ from fastapi.staticfiles import StaticFiles
 from starlette.middleware.sessions import SessionMiddleware
 
 from app import public as public_routes
+from app import webhooks
 from app.admin import routes as admin
 from app.admin.auth import CsrfFailed, LoginRequired
 from app.bank.factory import make_bank_provider
@@ -19,6 +20,7 @@ from app.config import Settings, get_settings
 from app.db.migrate import upgrade_to_head
 from app.db.session import Database
 from app.invoices.pdf import pdf_engine_status
+from app.payments.poller import poll_forever
 
 log = logging.getLogger("app")
 
@@ -60,9 +62,18 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             )
         else:
             log.warning("TELEGRAM_BOT_TOKEN not set; running API only")
+        poller: asyncio.Task[None] | None = None
+        if settings.poll_enabled:
+            poller = asyncio.create_task(poll_forever(settings, db, bank, bot))
         try:
             yield
         finally:
+            if poller:
+                poller.cancel()
+                with suppress(asyncio.CancelledError):
+                    await poller
+            if hasattr(bank, "aclose"):
+                await bank.aclose()
             if polling:
                 polling.cancel()
                 with suppress(asyncio.CancelledError):
@@ -91,6 +102,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     app.include_router(admin.public)
     app.include_router(admin.router)
     app.include_router(public_routes.router)
+    app.include_router(webhooks.router)
 
     @app.exception_handler(LoginRequired)
     async def _login_required(request: Request, exc: LoginRequired) -> RedirectResponse:
@@ -113,6 +125,9 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             "pdf": pdf_engine_status(),
             "llm": bool(settings.anthropic_api_key),
             "email": bool(settings.smtp_host),
+            "bank_accounts": sorted(settings.paynetics_credentials())
+            if settings.bank_provider.value == "paynetics"
+            else [],
         }
 
     return app

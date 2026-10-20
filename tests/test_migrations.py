@@ -77,3 +77,35 @@ async def test_m2_upgrade_with_existing_rows(tmp_path: Path) -> None:
             None,
             12000,
         )
+
+
+async def test_m3_upgrade_with_existing_rows(tmp_path: Path) -> None:
+    import asyncio
+
+    from alembic import command
+
+    from app.db.migrate import alembic_config
+
+    db = tmp_path / "m.db"
+    url = f"sqlite+aiosqlite:///{db}"
+    await asyncio.to_thread(command.upgrade, alembic_config(url), "d7136a890cb2")
+    with sqlite3.connect(db) as conn:
+        conn.execute(
+            "INSERT INTO bank_transfers (id, provider, external_id, direction, status, amount,"
+            " currency, raw_json, created_at, updated_at) VALUES (1, 'mock', 'T1', 'incoming',"
+            " 'processed', 1000, 'EUR', '{}', '2026-10-20', '2026-10-20')"
+        )
+        conn.execute(
+            "INSERT INTO payment_matches (id, transfer_id, confidence, method, created_at,"
+            " updated_at) VALUES (1, 1, 'LOW', 'no match', '2026-10-20', '2026-10-20')"
+        )
+    await upgrade_to_head(url)
+    with sqlite3.connect(db) as conn:
+        assert conn.execute(
+            "SELECT company_id, account, amount FROM bank_transfers"
+        ).fetchone() == (
+            None,
+            None,
+            1000,
+        )
+        assert conn.execute("SELECT count(*) FROM payment_matches").fetchone() == (1,)

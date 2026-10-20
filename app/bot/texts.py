@@ -172,3 +172,70 @@ def invoice_list(items) -> str:  # noqa: ANN001
             f"{fmt_money(inv.amount_gross, inv.currency)} · {inv.status.value}"
         )
     return "\n".join(rows)
+
+
+# --- payments -------------------------------------------------------------------------
+
+NO_TRANSFERS = "No bank transfers seen yet."
+NOT_A_PAYMENT = "Marked as not an invoice payment."
+ONLY_APPROVERS_PAY = "Only approvers can confirm payments."
+SYNC_RUNNING = "Checking the bank…"
+SYNC_DONE = "Bank checked: {n} new payment event(s)."
+
+
+def _payer(bt) -> str:  # noqa: ANN001
+    who = escape(bt.payer_name or "unknown payer")
+    if bt.payer_account:
+        who += f" (<code>{escape(redact_iban(bt.payer_account))}</code>)"
+    return who
+
+
+def payment_paid(bt, company, inv) -> str:  # noqa: ANN001
+    return (
+        f"💰 <b>Received {fmt_money(bt.amount, bt.currency)}</b> from {_payer(bt)}\n"
+        f"for invoice <b>{escape(inv.number)}</b>"
+        + (f" ({escape(company.code)})" if company else "")
+        + " — marked <b>PAID</b>."
+        + (f"\nReason: {escape(bt.reference)}" if bt.reference else "")
+    )
+
+
+def payment_review(bt, company, method: str, suggested) -> str:  # noqa: ANN001
+    head = f"❓ <b>Incoming {fmt_money(bt.amount, bt.currency)}</b> from {_payer(bt)}" + (
+        f" to {escape(company.code)}" if company else ""
+    )
+    lines = [head]
+    if bt.reference:
+        lines.append(f"Reason: {escape(bt.reference)}")
+    if suggested is not None:
+        lines.append(
+            f"Possible match: invoice <b>{escape(suggested.number)}</b> "
+            f"({fmt_money(suggested.amount_gross, suggested.currency)}) — {escape(method)}."
+        )
+    else:
+        lines.append(f"No certain match ({escape(method)}).")
+    lines.append("Which invoice does it pay?")
+    return "\n".join(lines)
+
+
+def payment_confirmed(number: str, user_name: str) -> str:
+    return f"✅ Confirmed as payment of invoice <b>{escape(number)}</b> by {escape(user_name)}."
+
+
+def transfers_list(rows) -> str:  # noqa: ANN001
+    out = ["<b>Recent bank transfers</b>"]
+    for bt, code, match_number, needs_review in rows:
+        arrow = {"incoming": "⬅️", "outgoing": "➡️"}.get(bt.direction.value, "🔁")
+        other = bt.payer_name if bt.direction.value == "incoming" else bt.beneficiary_name
+        when = f"{bt.booked_at:%d.%m %H:%M}" if bt.booked_at else ""
+        if match_number:
+            state = f"✅ {escape(match_number)}"
+        elif needs_review:
+            state = "❓ needs review"
+        else:
+            state = escape(bt.status)
+        out.append(
+            f"{arrow} {when} {escape(code or '?')} · {fmt_money(bt.amount, bt.currency)} · "
+            f"{escape((other or '-')[:30])} · {state}"
+        )
+    return "\n".join(out)
