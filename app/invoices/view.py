@@ -19,6 +19,7 @@ class Party:
     manager: str = ""
     email: str = ""
     phone: str = ""
+    website: str = ""
 
 
 @dataclass
@@ -82,6 +83,7 @@ def party_from_company(c: Company) -> Party:
         manager=c.manager or "",
         email=c.email_from or "",
         phone=c.phone or "",
+        website=c.website or "",
     )
 
 

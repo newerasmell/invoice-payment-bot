@@ -1,42 +1,55 @@
 {% extends "_base.html.j2" %}
-{% from "_macros.html.j2" import party, meta, lines, totals, bank, notes, signature, logo with context %}
+{% from "_macros.html.j2" import brand, supplier_lines, customer_lines, meta_rows, lines, totals, words_and_vat_note, payment, notes, signature with context %}
 {% block style %}
-  .page { padding-left: 10mm; }
-  .page::before { content: ""; position: absolute; left: 0; top: 0; bottom: 0; width: 3mm; background: {{ o.accent_color }}; border-radius: 2px; }
-  .top td { vertical-align: top; }
-  .title { font-size: 30pt; font-weight: 700; color: {{ o.accent_color }}; letter-spacing: -.01em; line-height: 1; }
-  .logo { max-height: 56px; max-width: 180px; margin-bottom: 10px; }
-  .hero { margin-top: 22px; background: #f6f7f9; border-radius: 6px; padding: 14px 16px; }
-  .hero .label { margin: 0; }
-  .hero .amount { font-size: 24pt; font-weight: 700; color: {{ o.accent_color }}; }
-  .parties { margin-top: 20px; }
-  .parties td { width: 50%; vertical-align: top; padding-right: 16px; }
-  .lines thead th { border-bottom: 2px solid {{ o.accent_color }}; color: {{ o.accent_color }}; }
-  .totals .grand th, .totals .grand td { color: #fff; background: {{ o.accent_color }}; }
+  .head td { vertical-align: middle; }
+  .titlebox { background: {{ o.accent_color }}; color: #fff; padding: 4mm 5mm; }
+  .titlebox .title { font-size: 24pt; font-weight: 700; text-align: right; line-height: 1; letter-spacing: .03em; }
+  .titlebox .subtitle { text-align: right; font-size: 9pt; opacity: .85; margin-top: 1mm; }
+  .titlebox table { width: auto; margin: 3mm 0 0 auto; }
+  .titlebox th { text-align: right; font-weight: 400; opacity: .8; padding: 1px 8px 1px 0; }
+  .titlebox td { text-align: right; font-weight: 600; padding: 1px 0; }
+  .parties { margin-top: 8mm; }
+  .parties > tbody > tr > td { width: 50%; vertical-align: top; padding-right: 8mm; }
+  .party-title { font-size: 11pt; font-weight: 800; color: {{ o.accent_color }}; border-bottom: 1.4pt solid #1f2329; padding-bottom: 1.5mm; margin-bottom: 2mm; text-transform: uppercase; letter-spacing: .02em; }
+  .lines thead th { background: {{ o.accent_color }}; color: #fff; text-align: center; }
+  .lines thead th.desc { text-align: left; }
+  .lines td { border-right: 1.2pt solid #fff; }
+  .totals .grand th { background: {{ o.accent_color }}; color: #fff; border-radius: 10pt 0 0 10pt; padding-left: 5mm; }
+  .totals .grand td { background: {{ o.accent_color | tint(0.82) }}; color: {{ o.accent_color }}; }
+  .lines tbody tr:nth-child(odd) td { background: {{ o.accent_color | tint(0.94) }}; }
+  .lines tbody tr:nth-child(even) td { background: {{ o.accent_color | tint(0.88) }}; }
+  .bottom { margin-top: 7mm; border-top: .6pt solid #d1d5db; padding-top: 3mm; }
+  .bottom > tbody > tr > td { vertical-align: top; width: 55%; padding-right: 6mm; }
+  .band { margin-top: 8mm; background: {{ o.accent_color }}; color: #fff; text-align: center; padding: 2.5mm; font-weight: 600; }
 {% endblock %}
 {% block body %}
-<table class="top"><tr>
-  <td>
-    {% if o.logo_position == "left" %}{{ logo() }}<br>{% endif %}
-    <div class="title">{{ o.title }}</div>
+<table class="head"><tr>
+  {% if o.logo_position != "right" %}<td style="width:50%">{{ brand() }}</td>{% endif %}
+  <td style="width:50%">
+    <div class="titlebox">
+      <div class="title">{{ o.title }}</div>
+      {% if o.subtitle %}<div class="subtitle">{{ o.subtitle }}</div>{% endif %}
+      <table>
+        <tr><th>Invoice No</th><td>{{ inv.number }}</td></tr>
+        <tr><th>Invoice date</th><td>{{ inv.issue_date | date }}</td></tr>
+      </table>
+    </div>
   </td>
-  <td style="width:42%">
-    {% if o.logo_position == "right" %}<div style="text-align:right">{{ logo() }}</div>{% endif %}
-    {{ meta() }}
-  </td>
+  {% if o.logo_position == "right" %}<td style="width:50%;text-align:right">{{ brand() }}</td>{% endif %}
 </tr></table>
-{% if o.header_note %}<p class="header-note" style="margin-top:12px">{{ o.header_note }}</p>{% endif %}
-<table class="hero"><tr>
-  <td><div class="label">Amount due</div><div class="amount">{{ inv.gross | money }} {{ inv.currency }}</div></td>
-  {% if o.show_due_date and inv.due_date %}<td style="text-align:right"><div class="label">Due by</div><div style="font-size:13pt;font-weight:600">{{ inv.due_date | date }}</div></td>{% endif %}
-</tr></table>
+{% if o.header_note %}<p class="header-note">{{ o.header_note }}</p>{% endif %}
 <table class="parties"><tr>
-  <td>{{ party("From", inv.supplier) }}</td>
-  <td>{{ party("Bill to", inv.customer) }}</td>
+  <td><div class="party-title">Bill from</div>{{ supplier_lines() }}</td>
+  <td><div class="party-title">Bill to</div>{{ customer_lines() }}</td>
 </tr></table>
-{{ lines() }}
+{{ lines(rows_min=6) }}
 {{ totals() }}
+{{ words_and_vat_note() }}
+<table class="bottom"><tr>
+  <td>{% if o.show_bank_details and inv.bank %}<div class="section-label">Payment</div>{{ payment() }}{% endif %}</td>
+  <td><table class="kv">{{ meta_rows() }}</table></td>
+</tr></table>
 {{ notes() }}
-{{ bank() }}
 {{ signature() }}
+<div class="band">{{ "Thank you for your business!" }}</div>
 {% endblock %}

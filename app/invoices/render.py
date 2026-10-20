@@ -6,6 +6,7 @@ from jinja2 import Environment, FileSystemLoader, StrictUndefined, select_autoes
 
 from app.invoices.options import LAYOUTS, TemplateOptions
 from app.invoices.view import InvoiceView
+from app.invoices.words import amount_in_words
 
 LAYOUT_DIR = Path(__file__).parent / "layouts"
 
@@ -16,6 +17,13 @@ def _money(v: Decimal) -> str:
 
 def _qty(v: Decimal) -> str:
     return f"{v.normalize():f}"
+
+
+def _tint(hex_color: str, white: float) -> str:
+    """Mix a #RRGGBB colour with white (0 = unchanged, 1 = white)."""
+    r, g, b = (int(hex_color[i : i + 2], 16) for i in (1, 3, 5))
+    r, g, b = (round(c + (255 - c) * white) for c in (r, g, b))
+    return f"#{r:02X}{g:02X}{b:02X}"
 
 
 def _date(v: date | None) -> str:
@@ -29,7 +37,7 @@ _env = Environment(
     trim_blocks=True,
     lstrip_blocks=True,
 )
-_env.filters.update(money=_money, qty=_qty, date=_date)
+_env.filters.update(money=_money, qty=_qty, date=_date, words=amount_in_words, tint=_tint)
 
 
 def render_invoice_html(inv: InvoiceView, layout: str, options: TemplateOptions) -> str:

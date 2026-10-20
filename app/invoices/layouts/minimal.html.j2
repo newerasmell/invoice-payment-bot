@@ -1,34 +1,40 @@
 {% extends "_base.html.j2" %}
-{% from "_macros.html.j2" import party, meta, lines, totals, bank, notes, signature, logo with context %}
+{% from "_macros.html.j2" import brand, supplier_lines, customer_lines, meta_rows, lines, totals, words_and_vat_note, payment, notes, signature with context %}
 {% block style %}
   body { color: #111; }
-  .head td { vertical-align: bottom; }
-  .title { font-size: 13pt; font-weight: 600; letter-spacing: .3em; text-transform: uppercase; }
-  .logo { max-height: 40px; max-width: 150px; filter: grayscale(100%); }
-  hr { border: 0; border-top: 1px solid #111; margin: 14px 0 20px; }
-  .parties td { width: 33.3%; vertical-align: top; padding-right: 14px; }
-  .label { color: {{ o.accent_color }}; }
-  .lines thead th { border-bottom: 1px solid #111; padding-left: 0; }
-  .lines td { padding-left: 0; border-bottom-color: #eee; }
-  .totals .grand th, .totals .grand td { border-top: 1px solid #111; }
-  .bank { border: 0; padding: 0; }
+  .head td { vertical-align: top; }
+  .title { font-size: 30pt; font-weight: 300; color: #b9c0cb; letter-spacing: .04em; text-align: right; line-height: 1; }
+  .subtitle { text-align: right; font-size: 8.5pt; color: #6b7280; margin-top: 1mm; }
+  .meta { width: auto; margin-left: auto; }
+  .meta th { text-align: right; padding: 1.5px 10px 1.5px 0; white-space: nowrap; }
+  .meta td { text-align: right; padding: 1.5px 0; white-space: nowrap; }
+  .sep { border: 0; border-top: 1.2pt solid #e5e7eb; margin: 6mm 0; }
+  .section-label { color: #111; text-transform: none; letter-spacing: 0; font-size: 9pt; }
+  .lines thead th { background: #111; color: #fff; }
+  .lines td { border-bottom: .6pt solid #eceff3; }
+  .totals .grand th, .totals .grand td { border-top: 1pt solid #111; }
+  .bottom-notes { margin-top: 8mm; border-top: 1.2pt solid #e5e7eb; padding-top: 4mm; }
 {% endblock %}
 {% block body %}
 <table class="head"><tr>
-  {% if o.logo_position == "left" %}<td style="width:1%;padding-right:14px">{{ logo() }}</td>{% endif %}
-  <td><div class="title">{{ o.title }}</div></td>
-  <td style="text-align:right">{% if o.logo_position == "right" %}{{ logo() }}{% else %}<span class="muted">No</span> <b>{{ inv.number }}</b>{% endif %}</td>
+  <td style="width:55%">{% if o.logo_position == "right" %}<div class="title" style="text-align:left">{{ o.title }}</div>{% else %}{{ brand() }}{% endif %}</td>
+  <td>{% if o.logo_position == "right" %}<div style="text-align:right">{{ brand() }}</div>{% else %}<div class="title">{{ o.title }}</div>{% endif %}
+    {% if o.subtitle %}<div class="subtitle">{{ o.subtitle }}</div>{% endif %}</td>
 </tr></table>
-<hr>
+<table class="head" style="margin-top:6mm"><tr>
+  <td style="width:55%">{{ supplier_lines() }}</td>
+  <td><table class="meta">{{ meta_rows() }}</table></td>
+</tr></table>
 {% if o.header_note %}<p class="header-note">{{ o.header_note }}</p>{% endif %}
-<table class="parties"><tr>
-  <td>{{ party("From", inv.supplier) }}</td>
-  <td>{{ party("To", inv.customer) }}</td>
-  <td style="padding-right:0">{{ meta() }}</td>
-</tr></table>
+<hr class="sep">
+<div class="section-label">Bill to:</div>
+{{ customer_lines() }}
 {{ lines() }}
 {{ totals() }}
-{{ notes() }}
-{{ bank() }}
+{{ words_and_vat_note() }}
+<div class="bottom-notes">
+  {% if o.show_bank_details and inv.bank %}<div class="section-label">Payment details</div>{{ payment() }}{% endif %}
+  {{ notes() }}
+</div>
 {{ signature() }}
 {% endblock %}

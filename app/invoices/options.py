@@ -32,6 +32,9 @@ class TemplateOptions(BaseModel):
     show_signature: bool = False
     show_due_date: bool = True
     show_line_numbers: bool = False
+    show_amount_in_words: bool = True
+    show_company_footer: bool = True  # legal details line at the bottom of the page
+    subtitle: str = ""  # e.g. "Original"
     header_note: str = ""
     footer_note: str = ""
 

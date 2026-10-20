@@ -439,6 +439,7 @@ def _options_from_form(form: FormData) -> tuple[str, TemplateOptions | None, dic
         "logo_position": f.text(form, "logo_position") or "left",
         "header_note": f.text(form, "header_note") or "",
         "footer_note": f.text(form, "footer_note") or "",
+        "subtitle": f.text(form, "subtitle") or "",
         **{
             k: f.checkbox(form, k)
             for k in (
@@ -447,6 +448,8 @@ def _options_from_form(form: FormData) -> tuple[str, TemplateOptions | None, dic
                 "show_signature",
                 "show_due_date",
                 "show_line_numbers",
+                "show_amount_in_words",
+                "show_company_footer",
             )
         },
     }

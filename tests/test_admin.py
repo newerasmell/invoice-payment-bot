@@ -208,7 +208,27 @@ def test_template_editor_and_preview(client: TestClient, sync_db: Session) -> No
         },
     ).text
     assert "#7C3AED" in live and "TAX INVOICE" in live and "Received by" in live
-    assert "Taxable amount" not in live  # unchecked box = hidden
+    assert "Subtotal" not in live and "Total in words" not in live  # unchecked = hidden
+    assert "Company ID 200000002" not in live  # company footer off
+
+    full = client.get(
+        f"/admin/templates/{tpl_id}/preview",
+        params={
+            "live": "1",
+            "layout": "classic",
+            "accent_color": "#0F766E",
+            "font": "Inter",
+            "title": "INVOICE",
+            "subtitle": "Original",
+            "logo_position": "left",
+            "show_vat_breakdown": "on",
+            "show_amount_in_words": "on",
+            "show_company_footer": "on",
+        },
+    ).text
+    assert "Subtotal" in full and "Original" in full
+    assert "one thousand six hundred nineteen euro and sixty-four cents" in full
+    assert "Company ID 200000002" in full and "Place of issue" in full
 
     r = post(
         client,

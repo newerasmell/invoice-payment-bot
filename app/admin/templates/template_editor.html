@@ -52,6 +52,10 @@
       <input id="f-title" type="text" name="title" value="{{ o.title }}" maxlength="40">
     </div>
     <div class="field">
+      <label for="f-subtitle">Subtitle</label>
+      <input id="f-subtitle" type="text" name="subtitle" value="{{ o.subtitle }}" maxlength="40" placeholder="e.g. Original">
+    </div>
+    <div class="field">
       <label for="f-logo">Logo</label>
       <select id="f-logo" name="logo_position">
         {% for key, label in [("left", "Left"), ("right", "Right"), ("none", "Hidden")] %}<option value="{{ key }}" {{ 'selected' if o.logo_position == key }}>{{ label }}</option>{% endfor %}
@@ -60,7 +64,7 @@
     </div>
     <div class="field">
       <label>Show</label>
-      {% for key, label in [("show_due_date", "Due date"), ("show_vat_breakdown", "VAT breakdown"), ("show_bank_details", "Bank details"), ("show_line_numbers", "Line numbers"), ("show_signature", "Signature lines")] %}
+      {% for key, label in [("show_due_date", "Due date"), ("show_vat_breakdown", "VAT breakdown"), ("show_bank_details", "Bank details"), ("show_line_numbers", "Line numbers"), ("show_amount_in_words", "Total in words"), ("show_company_footer", "Company details footer"), ("show_signature", "Signature lines")] %}
       <label class="check"><input type="checkbox" name="{{ key }}" {{ 'checked' if o[key] }}> {{ label }}</label>
       {% endfor %}
     </div>

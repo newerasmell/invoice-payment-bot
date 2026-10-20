@@ -4,43 +4,66 @@
 <head>
 <meta charset="utf-8">
 <title>Invoice {{ inv.number }}</title>
-<link rel="preconnect" href="https://fonts.googleapis.com">
-<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700&family=Roboto:wght@400;500;700&family=Source+Serif+4:wght@400;600;700&family=IBM+Plex+Sans:wght@400;600;700&family=Courier+Prime:wght@400;700&family=IBM+Plex+Mono&display=swap" rel="stylesheet">
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=Roboto:wght@400;500;700&family=Source+Serif+4:wght@400;600;700&family=IBM+Plex+Sans:wght@400;500;600;700&family=Courier+Prime:wght@400;700&family=IBM+Plex+Mono:wght@400;500&display=swap" rel="stylesheet">
 <style>
-  @page { size: A4; margin: 16mm 16mm 18mm; }
+  @page {
+    size: A4;
+    margin: 15mm 15mm 20mm;
+    @bottom-center { content: element(pagefooter); width: 100%; }
+  }
   * { box-sizing: border-box; }
   html { background: #fff; }
-  body { margin: 0; font-family: {{ o.font_stack | safe }}; font-size: 10pt; color: #1b1f24; line-height: 1.45; }
-  .page { width: 178mm; margin: 0 auto; position: relative; }
-  .muted { color: #6b7280; }
-  .mono { font-family: 'IBM Plex Mono', 'Courier New', monospace; }
-  .label { text-transform: uppercase; letter-spacing: .06em; font-size: 7.5pt; color: #6b7280; margin-bottom: 4px; font-weight: 600; }
-  .party-name { font-weight: 700; font-size: 11pt; margin-bottom: 2px; }
+  body { margin: 0; font-family: {{ o.font_stack | safe }}; font-size: 9pt; color: #1f2329; line-height: 1.45; }
+  .page { width: 180mm; margin: 0 auto; position: relative; }
   table { border-collapse: collapse; width: 100%; }
-  .meta th { text-align: left; font-weight: 400; color: #6b7280; padding: 1px 12px 1px 0; white-space: nowrap; }
-  .meta td { text-align: right; font-weight: 600; padding: 1px 0; }
-  .lines { margin-top: 18px; }
-  .lines th { font-size: 8pt; text-transform: uppercase; letter-spacing: .05em; text-align: left; padding: 8px 6px; }
-  .lines td { padding: 8px 6px; border-bottom: 1px solid #e5e7eb; vertical-align: top; }
+  th { font-weight: 600; }
+  .strong { font-weight: 700; }
+  .mono { font-family: 'IBM Plex Mono', 'Courier New', monospace; font-size: 8.6pt; }
+  .muted { color: #6b7280; }
+  .r { text-align: right; }
+  .logo { display: block; max-height: 16mm; max-width: 62mm; }
+  .brand-name { font-size: 17pt; font-weight: 800; color: {{ o.accent_color }}; letter-spacing: -.01em; line-height: 1.15; }
+  .addr div { margin: 0; }
+  .addr .strong { font-size: 10pt; margin-bottom: 1px; }
+  .section-label { font-size: 7.5pt; font-weight: 700; text-transform: uppercase; letter-spacing: .08em; color: {{ o.accent_color }}; margin: 0 0 4px; }
+  .label-inline { font-weight: 600; }
+
+  .lines { margin-top: 7mm; }
+  .lines th { font-size: 8pt; text-align: left; padding: 6px 7px; }
+  .lines td { padding: 6px 7px; vertical-align: top; }
   .lines .r, .lines th.r { text-align: right; white-space: nowrap; }
-  .lines .num { width: 24px; color: #6b7280; }
-  .totals { width: 46%; margin-left: auto; margin-top: 14px; }
-  .totals th { text-align: left; font-weight: 400; color: #4b5563; padding: 4px 6px; }
-  .totals td { text-align: right; padding: 4px 6px; white-space: nowrap; }
-  .totals .grand th, .totals .grand td { font-weight: 700; font-size: 12pt; padding-top: 8px; }
-  .vat-note { font-size: 8.5pt; color: #4b5563; text-align: right; margin: 6px 0 0; }
-  .bank { margin-top: 22px; padding: 10px 12px; border: 1px solid #e5e7eb; border-radius: 4px; width: 60%; }
-  .description, .notes { margin: 16px 0 0; }
-  .header-note { margin: 0 0 14px; font-size: 9pt; }
-  .footer-note { margin-top: 28px; padding-top: 10px; border-top: 1px solid #e5e7eb; font-size: 8.5pt; color: #4b5563; white-space: pre-line; }
-  .signatures { margin-top: 44px; }
-  .signatures td { width: 50%; padding-right: 30px; font-size: 9pt; color: #4b5563; vertical-align: bottom; }
-  .sigline { border-bottom: 1px solid #9ca3af; height: 34px; margin-bottom: 4px; }
-  .draft { position: absolute; top: 70mm; left: 0; right: 0; text-align: center; font-size: 72pt; font-weight: 700; color: rgba(220, 38, 38, .12); transform: rotate(-24deg); pointer-events: none; }
+  .lines .num { width: 9mm; text-align: center; }
+  .lines .qty { width: 20mm; }
+  .lines tr { page-break-inside: avoid; }
+  .lines tr.filler td { height: 7mm; }
+
+  .totals { width: 82mm; margin-left: auto; margin-top: 4mm; }
+  .totals th { text-align: left; font-weight: 400; color: #4b5563; padding: 4px 8px; }
+  .totals td { text-align: right; padding: 4px 8px; white-space: nowrap; }
+  .totals .grand th, .totals .grand td { font-weight: 800; font-size: 11pt; padding: 7px 8px; }
+
+  .words { margin: 5mm 0 0; font-size: 8.5pt; }
+  .vat-note { margin: 2mm 0 0; font-size: 8.5pt; color: #374151; }
+  .note { margin: 3mm 0 0; }
+  .kv th { text-align: left; font-weight: 400; color: #6b7280; padding: 2.5px 0; width: 32mm; vertical-align: top; }
+  .kv td { padding: 2.5px 0; }
+  .header-note { margin: 5mm 0 0; }
+  .footer-note { margin-top: 8mm; text-align: center; font-size: 8pt; color: #6b7280; font-style: italic; white-space: pre-line; }
+  .signatures { margin-top: 16mm; }
+  .signatures td { width: 50%; padding-right: 12mm; font-size: 8.5pt; color: #4b5563; vertical-align: bottom; }
+  .sigline { border-bottom: 1px solid #9ca3af; height: 12mm; margin-bottom: 4px; }
+  .draft { position: absolute; top: 80mm; left: 0; right: 0; text-align: center; font-size: 80pt; font-weight: 800; color: rgba(220, 38, 38, .10); transform: rotate(-24deg); }
+
+  .pagefooter { position: running(pagefooter); font-size: 7pt; color: #9ca3af; text-align: center; border-top: .6pt solid #e5e7eb; padding-top: 2mm; }
   {% block style %}{% endblock %}
 </style>
 </head>
 <body>
+{% if o.show_company_footer %}
+<div class="pagefooter">
+  {{ [inv.supplier.name, inv.supplier.eik and ("Company ID " ~ inv.supplier.eik), inv.supplier.vat_id and ("VAT " ~ inv.supplier.vat_id), [inv.supplier.address, inv.supplier.city, inv.supplier.country] | select | join(", ")] | select | join("  ·  ") }}
+</div>
+{% endif %}
 <div class="page">
   {% if inv.is_draft %}<div class="draft">DRAFT</div>{% endif %}
   {% block body %}{% endblock %}
