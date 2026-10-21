@@ -231,3 +231,32 @@ def test_spec_file_agrees_with_client() -> None:
     props = spec["components"]["schemas"]["transfers"]["properties"]
     assert {"transferId", "amount", "paymentDetails", "transferStatus"} <= set(props)
     json.dumps(props)
+
+
+async def test_cloudflare_challenge_is_explained() -> None:
+    def handler(req: httpx.Request) -> httpx.Response:
+        return httpx.Response(
+            403,
+            headers={"content-type": "text/html; charset=UTF-8", "cf-mitigated": "challenge"},
+            text="<!DOCTYPE html><html><head><title>Just a moment...</title>",
+        )
+
+    c = pn.PayneticsClient(
+        "X", "https://api.paynetics.online/v1", "tok", "sec", transport=httpx.MockTransport(handler)
+    )
+    with pytest.raises(pn.BankBlockedError, match="allow-list"):
+        await c.profile()
+
+    def html_500(req: httpx.Request) -> httpx.Response:
+        return httpx.Response(400, headers={"content-type": "text/html"}, text="<html>x</html>")
+
+    c = pn.PayneticsClient(
+        "X",
+        "https://api.paynetics.online/v1",
+        "tok",
+        "sec",
+        transport=httpx.MockTransport(html_500),
+    )
+    with pytest.raises(BankError) as e:
+        await c.profile()
+    assert "<html>" not in str(e.value)

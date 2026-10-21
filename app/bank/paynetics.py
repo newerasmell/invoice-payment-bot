@@ -26,6 +26,17 @@ _MAX_PAGES = 50
 _DIRECTIONS = {d.value: d for d in TransferDirection}
 
 
+class BankBlockedError(BankError):
+    """A proxy/WAF (Cloudflare) in front of the API refused this server."""
+
+
+def _is_cloudflare_challenge(r: httpx.Response) -> bool:
+    ctype = r.headers.get("content-type", "")
+    return "text/html" in ctype and (
+        "cf-mitigated" in r.headers or "Just a moment" in r.text[:2000]
+    )
+
+
 def _parse_dt(value: Any) -> datetime | None:
     """The spec does not document the date format; accept ISO and 'YYYY-MM-DD HH:MM:SS'."""
     if not value or not isinstance(value, str):
@@ -126,8 +137,14 @@ class PayneticsClient:
                     return None
                 if r.status_code == 401:
                     raise BankAuthError(f"Paynetics rejected the {self.code} credentials (401)")
+                if r.status_code == 403 and _is_cloudflare_challenge(r):
+                    raise BankBlockedError(
+                        "Blocked by Cloudflare in front of the Paynetics API (403 challenge). "
+                        "Ask Paynetics support to allow-list this server's outbound IP addresses."
+                    )
                 if r.status_code not in _RETRY_STATUS:
-                    raise BankError(f"Paynetics {path} returned {r.status_code}: {r.text[:200]}")
+                    body = r.text[:200] if "json" in r.headers.get("content-type", "") else ""
+                    raise BankError(f"Paynetics {path} returned {r.status_code} {body}".strip())
                 last = BankError(f"Paynetics {path} returned {r.status_code}")
                 retry_after = r.headers.get("retry-after")
                 if retry_after and retry_after.isdigit() and attempt < len(_BACKOFF):
