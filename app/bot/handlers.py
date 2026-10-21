@@ -76,6 +76,7 @@ async def _simulate(
     bank: MockBankProvider,
     allowed_user: AllowedUser,
     direction: TransferDirection,
+    settings: Settings,
 ) -> None:
     incoming = direction == TransferDirection.INCOMING
     usage = texts.DEV_USAGE_IN if incoming else texts.DEV_USAGE_OUT
@@ -129,7 +130,7 @@ async def _simulate(
         await s.commit()
     await message.answer(texts.simulated(transfer))
     # Same path as a real webhook: re-fetch from the bank, match, notify.
-    events = await psync.sync_one(db, bank, transfer.external_id)
+    events = await psync.sync_one(db, bank, transfer.external_id, settings)
     await payments_flow.notify(message.bot, db, events)
 
 
@@ -139,8 +140,9 @@ async def cmd_dev_in(
     db: Database,
     bank: MockBankProvider,
     allowed_user: AllowedUser,
+    settings: Settings,
 ) -> None:
-    await _simulate(message, command, db, bank, allowed_user, TransferDirection.INCOMING)
+    await _simulate(message, command, db, bank, allowed_user, TransferDirection.INCOMING, settings)
 
 
 async def cmd_dev_out(
@@ -149,8 +151,9 @@ async def cmd_dev_out(
     db: Database,
     bank: MockBankProvider,
     allowed_user: AllowedUser,
+    settings: Settings,
 ) -> None:
-    await _simulate(message, command, db, bank, allowed_user, TransferDirection.OUTGOING)
+    await _simulate(message, command, db, bank, allowed_user, TransferDirection.OUTGOING, settings)
 
 
 async def fallback(message: Message) -> None:

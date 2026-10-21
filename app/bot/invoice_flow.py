@@ -23,6 +23,7 @@ from sqlalchemy.orm import selectinload
 
 from app.audit import actor_tg, audit
 from app.bot import texts
+from app.companies import counterparty_for_company
 from app.config import Settings
 from app.db.models import (
     AllowedUser,
@@ -34,21 +35,34 @@ from app.db.models import (
 )
 from app.db.session import Database
 from app.delivery.service import client_channels, deliver
+from app.invoices import completeness as comp
 from app.invoices import service as svc
 from app.invoices.pdf import PdfUnavailable
-from app.llm.parser import InvoiceDraft, InvoiceParser, ParseContext, ParserError
+from app.llm.parser import (
+    SUPPORTED_MEDIA,
+    Attachment,
+    InvoiceDraft,
+    InvoiceParser,
+    ParseContext,
+    ParserError,
+)
+from app.payments.matching import norm_company_name
 
 log = logging.getLogger(__name__)
 
 
 class Flow(StatesGroup):
     picking = State()  # waiting for issuer/client buttons
+    collecting = State()  # waiting for missing client details
     editing = State()  # waiting for an edit request for data["invoice_id"]
 
 
 class Pick(CallbackData, prefix="pk"):
-    kind: str  # iss | cli | new | cancel
+    kind: str  # iss | cli | co (one of our companies as client) | new | cancel
     id: int = 0
+
+
+MAX_FILE_MB = 10
 
 
 class Inv(CallbackData, prefix="iv"):
@@ -104,14 +118,29 @@ async def _clients(s: AsyncSession) -> list[Counterparty]:
     return list((await s.scalars(q)).all())
 
 
-def _match_client(clients: list[Counterparty], draft: InvoiceDraft) -> Counterparty | None:
+def _match_client(
+    clients: list[Counterparty], companies: list[Company], draft: InvoiceDraft
+) -> Counterparty | Company | None:
+    """A known client, or one of OUR companies acting as the client (by code or name)."""
     if draft.client_id is not None:
         found = next((c for c in clients if c.id == draft.client_id), None)
         if found:
             return found
+    if draft.client_company_code:
+        code = draft.client_company_code.strip().upper()
+        found_co = next((c for c in companies if c.code == code), None)
+        if found_co:
+            return found_co
     if draft.client_text:
-        key = draft.client_text.strip().casefold()
-        exact = [c for c in clients if c.name.casefold() == key]
+        text = draft.client_text.strip()
+        key = norm_company_name(text)
+        for co in companies:
+            if text.upper() == co.code or key in {
+                norm_company_name(co.name),
+                norm_company_name(co.legal_name),
+            }:
+                return co
+        exact = [c for c in clients if norm_company_name(c.name) == key and key]
         if len(exact) == 1:
             return exact[0]
     return None
@@ -142,26 +171,66 @@ def _warnings(b: svc.InvoiceBundle, unclear: str | None) -> list[str]:
     return w
 
 
-async def _send_preview(
-    message: Message, db: Database, inv_id: int, unclear: str | None = None
+async def send_draft_preview(
+    bot: Bot,
+    chat_id: int,
+    db: Database,
+    inv_id: int,
+    unclear: str | None = None,
+    header: str | None = None,
 ) -> None:
+    """Draft PDF with Approve / Edit / Reject buttons (text only if the PDF engine is down)."""
     async with db.session() as s:
         b = await svc.load_bundle(s, inv_id)
         caption = texts.draft_caption(b.invoice, b.issuer, b.client, _warnings(b, unclear))
+        if header:
+            caption = f"{header}\n{caption}"[:1000]
         try:
             pdf = await svc.render_bundle_pdf(s, b)
         except PdfUnavailable as e:
             log.error("draft preview without PDF: %s", e)
-            await message.answer(
+            await bot.send_message(
+                chat_id,
                 caption + "\n" + texts.PDF_UNAVAILABLE.format(error=escape(str(e))),
                 reply_markup=draft_kb(inv_id),
             )
             return
-    await message.answer_document(
+    await bot.send_document(
+        chat_id,
         BufferedInputFile(pdf, filename=svc.pdf_filename(b.invoice)),
         caption=caption,
         reply_markup=draft_kb(inv_id),
     )
+
+
+async def _send_preview(
+    message: Message, db: Database, inv_id: int, unclear: str | None = None
+) -> None:
+    await send_draft_preview(message.bot, message.chat.id, db, inv_id, unclear)
+
+
+async def _attachments(message: Message) -> tuple[Attachment, ...] | str:
+    """Files on the message as Claude inputs, or a user-facing error string."""
+    if message.photo:
+        file_id, mime, size = message.photo[-1].file_id, "image/jpeg", message.photo[-1].file_size
+    elif message.document:
+        doc = message.document
+        file_id, mime, size = doc.file_id, (doc.mime_type or "").lower(), doc.file_size
+        if mime == "image/jpg":
+            mime = "image/jpeg"
+        if mime not in SUPPORTED_MEDIA:
+            return texts.UNSUPPORTED_FILE
+    else:
+        return ()
+    if size and size > MAX_FILE_MB * 1024 * 1024:
+        return texts.FILE_TOO_BIG.format(mb=MAX_FILE_MB)
+    buf = await message.bot.download(file_id)
+    assert buf is not None
+    return (Attachment(mime, buf.read()),)
+
+
+def _message_text(message: Message) -> str:
+    return message.text or message.caption or ""
 
 
 async def _parse(
@@ -170,17 +239,20 @@ async def _parse(
     db: Database,
     parser: InvoiceParser,
     current: dict[str, Any] | None = None,
-) -> tuple[InvoiceDraft, list, list]:
+    attachments: tuple[Attachment, ...] = (),
+) -> tuple[InvoiceDraft, list, list, list]:
     async with db.session() as s:
         companies = await _companies_for(s, user)
+        all_companies = list((await s.scalars(select(Company).order_by(Company.code))).all())
         clients = await _clients(s)
     ctx = ParseContext(
-        companies=[(c.code, c.legal_name or c.name) for c in companies],
+        companies=[(c.code, c.legal_name or c.name) for c in all_companies],
         clients=[(c.id, c.name) for c in clients],
         today=date.today(),
         current_draft=current,
     )
-    return await parser.parse(text, ctx), companies, clients
+    draft = await parser.parse(text, ctx, attachments)
+    return draft, companies, clients, all_companies
 
 
 # --- new request ----------------------------------------------------------------------------
@@ -197,9 +269,15 @@ async def on_text(
     if not parser.available:
         await message.answer(texts.PARSER_DISABLED)
         return
+    files = await _attachments(message)
+    if isinstance(files, str):
+        await message.answer(files)
+        return
     status = await message.answer(texts.READING)
     try:
-        draft, companies, clients = await _parse(message.text or "", allowed_user, db, parser)
+        draft, companies, clients, all_companies = await _parse(
+            _message_text(message), allowed_user, db, parser, attachments=files
+        )
     except ParserError as e:
         await status.edit_text(f"❗ {escape(str(e))}")
         return
@@ -215,13 +293,19 @@ async def on_text(
         await status.edit_text(texts.NO_COMPANIES_FOR_USER)
         return
     issuer = _match_issuer(companies, draft)
-    client = _match_client(clients, draft)
+    client = _match_client(clients, all_companies, draft)
+    client_id = client.id if isinstance(client, Counterparty) else None
+    if isinstance(client, Company):
+        async with db.session() as s:
+            client_id = (await counterparty_for_company(s, client)).id
+            await s.commit()
     await state.set_state(Flow.picking)
     await state.set_data(
         {
             "draft": draft.model_dump(mode="json"),
             "issuer_id": issuer.id if issuer else None,
-            "client_id": client.id if client else None,
+            "client_id": client_id,
+            "confirm_name": False,
         }
     )
     await status.delete()
@@ -248,10 +332,17 @@ async def _advance(
             )
             return
         if data.get("client_id") is None:
-            clients = await _clients(s)
+            clients = [c for c in await _clients(s) if c.company_id is None]
             key = (draft.client_text or "").casefold()
-            ranked = sorted(clients, key=lambda c: (key not in c.name.casefold(), c.name))[:8]
+            ranked = sorted(clients, key=lambda c: (key not in c.name.casefold(), c.name))[:6]
             rows = [[(c.name, Pick(kind="cli", id=c.id).pack())] for c in ranked]
+            ours = await s.scalars(
+                select(Company).where(Company.id != data["issuer_id"]).order_by(Company.code)
+            )
+            rows += [
+                [(f"🏢 {c.code} · {c.legal_name or c.name}", Pick(kind="co", id=c.id).pack())]
+                for c in ours
+            ]
             if draft.client_text:
                 rows.append(
                     [
@@ -270,6 +361,35 @@ async def _advance(
         if issuer is None or client is None:
             await state.clear()
             await message.answer(texts.FLOW_EXPIRED)
+            return
+        # Use whatever the request/document said about the client to fill empty fields.
+        changed = comp.apply_details(client, draft.client_details)
+        if changed:
+            audit(
+                s,
+                actor_tg(user.telegram_id),
+                "client.updated",
+                f"client:{client.id}",
+                {"fields": changed, "via": "telegram"},
+            )
+            await s.commit()
+        issuer_gaps = comp.missing_issuer(issuer, draft.currency or issuer.default_currency)
+        if issuer_gaps:
+            await state.clear()
+            link = (
+                f"{settings.public_base_url.rstrip('/')}/admin/companies/{issuer.id}"
+                if settings.public_base_url
+                else None
+            )
+            await message.answer(texts.issuer_incomplete(issuer.code, issuer_gaps, link))
+            return
+        client_gaps = comp.missing_client(client, bool(data.get("confirm_name")))
+        if client_gaps:
+            await state.set_state(Flow.collecting)
+            await state.update_data(asking=client_gaps)
+            await message.answer(
+                texts.ask_client_details(client.name, comp.labels(client_gaps), _known(client))
+            )
             return
         try:
             inv = await svc.create_draft(
@@ -316,10 +436,23 @@ async def on_pick(
         data["issuer_id"] = callback_data.id
     elif callback_data.kind == "cli":
         data["client_id"] = callback_data.id
+    elif callback_data.kind == "co":
+        async with db.session() as s:
+            company = await s.get(Company, callback_data.id)
+            if company is None:
+                await cb.message.edit_text(texts.FLOW_EXPIRED)
+                return
+            data["client_id"] = (await counterparty_for_company(s, company)).id
+            await s.commit()
     elif callback_data.kind == "new":
-        name = (data["draft"].get("client_text") or "").strip()
+        draft = InvoiceDraft.model_validate(data["draft"])
+        details = draft.client_details
+        name = ((details.name if details else None) or draft.client_text or "").strip()
+        # A name typed in the chat may be a nickname/abbreviation: confirm the legal name.
+        data["confirm_name"] = not (details and details.name)
         async with db.session() as s:
             client = Counterparty(name=name)
+            comp.apply_details(client, details)
             s.add(client)
             await s.flush()
             audit(
@@ -334,6 +467,79 @@ async def on_pick(
     await state.set_data(data)
     await cb.message.delete()
     await _advance(cb.message, state, db, settings, allowed_user)
+
+
+def _known(c: Counterparty) -> dict[str, str]:
+    fields = [
+        ("name", "name"),
+        ("eik", "company no"),
+        ("vat_id", "VAT"),
+        ("address", "address"),
+        ("city", "city"),
+        ("country", "country"),
+    ]
+    return {label: getattr(c, attr) for attr, label in fields if getattr(c, attr)}
+
+
+async def on_collect(
+    message: Message,
+    state: FSMContext,
+    db: Database,
+    parser: InvoiceParser,
+    settings: Settings,
+    allowed_user: AllowedUser,
+) -> None:
+    """The operator answers with missing client details (text, photo or PDF)."""
+    data = await state.get_data()
+    asking: list[str] = data.get("asking") or []
+    files = await _attachments(message)
+    if isinstance(files, str):
+        await message.answer(files)
+        return
+    text = _message_text(message).strip()
+    async with db.session() as s:
+        client = await s.get(Counterparty, data.get("client_id"))
+        if client is None:
+            await state.clear()
+            await message.answer(texts.FLOW_EXPIRED)
+            return
+        if parser.available:
+            try:
+                details = await parser.extract_party(
+                    text, _known(client), [comp.labels([a]) for a in asking], files
+                )
+            except ParserError as e:
+                await message.answer(f"❗ {escape(str(e))}")
+                return
+            changed = comp.apply_details(client, details, overwrite=set(asking))
+        elif len(asking) == 1 and text:
+            setattr(client, asking[0], text)  # no Claude: take the reply as the one asked value
+            changed = asking[:1]
+        else:
+            changed = []
+        if changed:
+            audit(
+                s,
+                actor_tg(allowed_user.telegram_id),
+                "client.updated",
+                f"client:{client.id}",
+                {"fields": changed, "via": "telegram"},
+            )
+            await s.commit()
+        confirm_name = bool(data.get("confirm_name")) and "name" not in changed
+        remaining = comp.missing_client(client, confirm_name)
+        name, known = client.name, _known(client)
+    await state.update_data(confirm_name=confirm_name, asking=remaining)
+    if changed:
+        await message.answer(texts.details_saved(name, comp.labels(changed)))
+    if remaining:
+        question = texts.ask_client_details(name, comp.labels(remaining), known)
+        await message.answer(
+            question if changed else texts.COLLECT_NOTHING_FOUND.format(question=question)
+        )
+        return
+    await state.set_state(Flow.picking)
+    await _advance(message, state, db, settings, allowed_user)
 
 
 # --- draft actions --------------------------------------------------------------------------
@@ -459,10 +665,14 @@ async def on_edit_text(
             await state.clear()
             await message.answer(texts.FLOW_EXPIRED)
             return
+    files = await _attachments(message)
+    if isinstance(files, str):
+        await message.answer(files)
+        return
     status = await message.answer(texts.READING)
     try:
-        draft, companies, clients = await _parse(
-            message.text or "", allowed_user, db, parser, current
+        draft, companies, clients, all_companies = await _parse(
+            _message_text(message), allowed_user, db, parser, current, files
         )
     except ParserError as e:
         await status.edit_text(f"❗ {escape(str(e))}")
@@ -470,7 +680,8 @@ async def on_edit_text(
     async with db.session() as s:
         b = await svc.load_bundle(s, inv_id)
         issuer = _match_issuer(companies, draft) or b.issuer
-        client = _match_client(clients, draft)
+        match = _match_client(clients, all_companies, draft)
+        client = await counterparty_for_company(s, match) if isinstance(match, Company) else match
         note = None
         if client is None:
             client = b.client
@@ -538,8 +749,10 @@ def make_router() -> Router:
     r = Router(name="invoices")
     r.message.register(cmd_cancel, Command("cancel"))
     r.message.register(cmd_invoices, Command("invoices"))
-    r.message.register(on_edit_text, StateFilter(Flow.editing), F.text & ~F.text.startswith("/"))
-    r.message.register(on_text, F.text & ~F.text.startswith("/"))
+    content = (F.text & ~F.text.startswith("/")) | F.photo | F.document
+    r.message.register(on_edit_text, StateFilter(Flow.editing), content)
+    r.message.register(on_collect, StateFilter(Flow.collecting), content)
+    r.message.register(on_text, content)
     r.callback_query.register(on_pick, Pick.filter())
     r.callback_query.register(on_invoice_action, Inv.filter())
     return r

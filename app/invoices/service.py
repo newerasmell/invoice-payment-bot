@@ -55,6 +55,20 @@ class InvoiceBundle:
     client: Counterparty
 
 
+def check_complete(b: "InvoiceBundle") -> str:
+    """Empty string when issuer and client have everything an invoice needs."""
+    from app.invoices.completeness import labels, missing_client, missing_issuer
+
+    parts = []
+    issuer_gaps = missing_issuer(b.issuer, b.invoice.currency)
+    if issuer_gaps:
+        parts.append(f"{b.issuer.code}: {', '.join(issuer_gaps)} (admin panel)")
+    client_gaps = missing_client(b.client)
+    if client_gaps:
+        parts.append(f"{b.client.name}: {labels(client_gaps)}")
+    return "; ".join(parts)
+
+
 def number_for(company: Company, n: int) -> str:
     return f"{company.invoice_prefix or ''}{n:010d}"
 
@@ -359,6 +373,9 @@ async def _approve(
     await session.refresh(inv, ["status"])  # another click may have approved it meanwhile
     if inv.status != InvoiceStatus.DRAFT:
         raise InvoiceError(f"Invoice is already {inv.status.value.lower()}")
+    incomplete = check_complete(b)
+    if incomplete:
+        raise InvoiceError(f"Cannot approve yet. Missing: {incomplete}")
     _check_limit(inv, settings)
     # Atomic increment: concurrent approvals for the same issuer can never share a number.
     n = await session.scalar(

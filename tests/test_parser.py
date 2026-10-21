@@ -43,7 +43,7 @@ def parser_returning(*outputs: str) -> InvoiceParser:
     p = InvoiceParser("test-key", "claude-sonnet-5-5")
     queue = list(outputs)
 
-    async def fake_call(prompt: str) -> str:
+    async def fake_call(system: str, prompt: str, schema: dict, attachments=()) -> str:  # noqa: ANN001
         return queue.pop(0)
 
     p._call = fake_call  # type: ignore[method-assign]

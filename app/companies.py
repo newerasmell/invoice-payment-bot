@@ -8,7 +8,14 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
 from app.audit import audit
-from app.db.models import AllowedUser, Company, CompanyBankAccount, InvoiceTemplate, UserRole
+from app.db.models import (
+    AllowedUser,
+    Company,
+    CompanyBankAccount,
+    Counterparty,
+    InvoiceTemplate,
+    UserRole,
+)
 
 _COMPANY_FIELDS = {
     "code",
@@ -103,3 +110,32 @@ def default_bank_account(
         same = [a for a in accounts if a.currency == currency]
         accounts = same or accounts
     return next((a for a in accounts if a.is_default), accounts[0] if accounts else None)
+
+
+async def counterparty_for_company(session: AsyncSession, company: Company) -> Counterparty:
+    """The client profile that represents one of our own companies (created on first use)."""
+    cp = await session.scalar(
+        select(Counterparty).where(Counterparty.company_id == company.id).order_by(Counterparty.id)
+    )
+    if cp is None:
+        cp = Counterparty(
+            name=company.legal_name or company.name,
+            eik=company.eik,
+            vat_id=company.vat_id,
+            address=company.address,
+            city=company.city,
+            country=company.country,
+            contact_name=company.manager,
+            email=company.email_from,
+            company_id=company.id,
+        )
+        session.add(cp)
+        await session.flush()
+        audit(
+            session,
+            "system",
+            "client.created",
+            f"client:{cp.id}",
+            {"name": cp.name, "from_company": company.code},
+        )
+    return cp

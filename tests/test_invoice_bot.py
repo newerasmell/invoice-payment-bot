@@ -2,12 +2,12 @@ from decimal import Decimal
 
 from aiogram.methods import AnswerCallbackQuery, SendDocument, SendMessage
 from fastapi.testclient import TestClient
-from sqlalchemy import select
+from sqlalchemy import func, select
 
 from app.bot.invoice_flow import Inv, Pick
 from app.db.models import AllowedUser, Counterparty, Invoice, InvoiceStatus, UserRole
-from app.llm.parser import InvoiceDraft, ParserError
-from tests.conftest import APPROVER_ID, BotHarness
+from app.llm.parser import InvoiceDraft, ParserError, PartyDetails
+from tests.conftest import APPROVER_ID, CLIENT_DETAILS, BotHarness
 
 OPERATOR_ID = 2002
 
@@ -34,7 +34,10 @@ def buttons(call) -> list[str]:  # noqa: ANN001
 async def _client(db, **kw) -> int:  # noqa: ANN001, ANN003
     async with db.session() as s:
         c = Counterparty(
-            name="Client Ltd", email="ap@client.example", delivery_channels=["email"], **kw
+            name="Client Ltd",
+            email="ap@client.example",
+            delivery_channels=["email"],
+            **{**CLIENT_DETAILS, **kw},
         )
         s.add(c)
         await s.commit()
@@ -47,7 +50,7 @@ async def test_full_flow_text_to_sent(harness: BotHarness, db) -> None:
     calls = await harness.send_raw("Invoice Client Ltd 1200 EUR from Z for consulting")
 
     # The parser saw our companies and clients as context.
-    _, ctx = harness.parser.calls[0]
+    _, ctx, _ = harness.parser.calls[0]
     assert ("Z", "Company Z Ltd") in ctx.companies and (cid, "Client Ltd") in ctx.clients
 
     [preview] = docs(calls)
@@ -76,9 +79,9 @@ async def test_full_flow_text_to_sent(harness: BotHarness, db) -> None:
         assert inv.status == InvoiceStatus.SENT and inv.created_by == APPROVER_ID
 
 
-async def test_pick_issuer_and_create_client(harness: BotHarness, db) -> None:
-    harness.parser.queue.append(draft(issuer_code=None, client_text="Brand New Ltd"))
-    calls = await harness.send_raw("invoice brand new 1200")
+async def test_pick_issuer_new_client_collects_details(harness: BotHarness, db) -> None:
+    harness.parser.queue.append(draft(issuer_code=None, client_text="BNL"))
+    calls = await harness.send_raw("invoice BNL 1200")
     [ask] = [c for c in calls if isinstance(c, SendMessage) and "Which of our" in c.text]
     assert len(buttons(ask)) == 4  # X, Z, G + cancel
     async with db.session() as s:
@@ -88,12 +91,100 @@ async def test_pick_issuer_and_create_client(harness: BotHarness, db) -> None:
     calls = await harness.click(Pick(kind="iss", id=z).pack())
     [ask] = [c for c in calls if isinstance(c, SendMessage) and "Who is the client" in c.text]
     assert Pick(kind="new").pack() in buttons(ask)
+    # Our other companies are offered as clients too.
+    assert any(b.startswith("pk:co:") for b in buttons(ask))
+
     calls = await harness.click(Pick(kind="new").pack())
+    assert docs(calls) == []  # no draft without the client's details
+    [q] = [c.text for c in calls if isinstance(c, SendMessage)]
+    assert "still need: <b>full legal name, company number, street address, city, country" in q
+
+    # A partial answer: saved, and the rest is asked again.
+    harness.parser.party_queue.append(
+        PartyDetails(name="Brand New Labs Ltd", company_number="13579246")
+    )
+    calls = await harness.send_raw("Brand New Labs Ltd, company no 13579246")
+    out = [c.text for c in calls if isinstance(c, SendMessage)]
+    assert "Saved for Brand New Labs Ltd: full legal name, company number" in out[0]
+    assert "still need: <b>street address, city, country" in out[1]
+    assert docs(calls) == []
+
+    # The rest arrives as a PDF (e.g. their company card).
+    harness.parser.party_queue.append(
+        PartyDetails(address="1 Main St", city="London", country="United Kingdom")
+    )
+    calls = await harness.send_raw("", document=("card.pdf", "application/pdf", b"%PDF-1.4 x"))
+    assert harness.parser.calls[-1][3][0].media_type == "application/pdf"
     [preview] = docs(calls)
-    assert "Z → Brand New Ltd" in preview.caption
-    assert "has no email/Telegram" in preview.caption
+    assert "Z → Brand New Labs Ltd" in preview.caption
     async with db.session() as s:
-        assert await s.scalar(select(Counterparty).where(Counterparty.name == "Brand New Ltd"))
+        c = await s.scalar(select(Counterparty).where(Counterparty.eik == "13579246"))
+        assert (c.name, c.city, c.country) == ("Brand New Labs Ltd", "London", "United Kingdom")
+
+
+async def test_our_company_code_is_recognised_as_client(harness: BotHarness, db) -> None:
+    # "NSOL"-style: the operator names one of our companies by its code.
+    harness.parser.queue.append(draft(issuer_code="Z", client_text="x"))
+    calls = await harness.send_raw("invoice from Z to X for 98k marketing")
+    [preview] = docs(calls)
+    assert "Z → Company X Ltd" in preview.caption  # full legal name, not "X"
+    harness.parser.queue.append(draft(issuer_code="Z", client_text=None, client_company_code="G"))
+    [preview] = docs(await harness.send_raw("invoice G"))
+    assert "Z → Company G Ltd" in preview.caption
+    async with db.session() as s:
+        assert await s.scalar(select(func.count(Counterparty.id))) == 2  # X and G profiles
+
+
+async def test_details_from_document_create_complete_client(harness: BotHarness, db) -> None:
+    details = PartyDetails(
+        name="Looplyx Ltd",
+        company_number="16591090",
+        address="262 Uxbridge Rd",
+        city="Hatch End",
+        country="United Kingdom",
+        vat_id=None,
+    )
+    harness.parser.queue.append(draft(client_text="Looplyx Ltd", client_details=details))
+    calls = await harness.send_raw("invoice like this one", photo=b"\xff\xd8jpeg")
+    assert harness.parser.calls[-1][2][0].media_type == "image/jpeg"
+    [ask] = [c for c in calls if isinstance(c, SendMessage) and "Who is the client" in c.text]
+    [preview] = docs(await harness.click(Pick(kind="new").pack()))  # nothing left to ask
+    assert "Z → Looplyx Ltd" in preview.caption
+
+
+async def test_unsupported_file_and_issuer_incomplete(harness: BotHarness, db) -> None:
+    calls = await harness.send_raw("x", document=("a.docx", "application/msword", b"doc"))
+    assert any("isn't supported" in (getattr(c, "text", "") or "") for c in calls)
+
+    async with db.session() as s:
+        from app.db.models import Company
+
+        z = await s.scalar(select(Company).where(Company.code == "Z"))
+        z.eik = None
+        await s.commit()
+    cid = await _client(db)
+    harness.parser.queue.append(draft(client_id=cid))
+    calls = await harness.send_raw("invoice")
+    assert docs(calls) == []
+    [msg] = [c.text for c in calls if isinstance(c, SendMessage) and "can't issue" in c.text]
+    assert "missing: <b>company number</b>" in msg and "/admin/companies/" in msg
+
+
+async def test_approve_blocked_when_client_incomplete(harness: BotHarness, db) -> None:
+    cid = await _client(db)
+    harness.parser.queue.append(draft(client_id=cid))
+    inv_id = int(buttons(docs(await harness.send_raw("invoice"))[0])[0].rsplit(":", 1)[1])
+    async with db.session() as s:
+        (await s.get(Counterparty, cid)).address = None  # someone blanked it in the admin panel
+        await s.commit()
+    calls = await harness.click(Inv(action="ap", id=inv_id).pack())
+    assert any(
+        isinstance(c, AnswerCallbackQuery)
+        and "Missing: Client Ltd: street address" in (c.text or "")
+        for c in calls
+    )
+    async with db.session() as s:
+        assert (await s.get(Invoice, inv_id)).status == InvoiceStatus.DRAFT
 
 
 async def test_cancel_pick(harness: BotHarness, db) -> None:
@@ -120,7 +211,7 @@ async def test_edit_and_reject(harness: BotHarness, db) -> None:
         )
     )
     calls = await harness.send_raw("make it 2 x 750 with no VAT")
-    _, ctx = harness.parser.calls[-1]
+    _, ctx, _ = harness.parser.calls[-1]
     assert ctx.current_draft["lines"][0]["unit_price"] == "1200.00"
     [preview] = docs(calls)
     assert "1,500.00 EUR" in preview.caption

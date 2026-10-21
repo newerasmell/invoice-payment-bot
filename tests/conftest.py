@@ -36,6 +36,14 @@ class FakeTelegramSession(BaseSession):
         timeout: int | None = None,  # noqa: ASYNC109 (aiogram signature)
     ) -> TelegramType:
         self.requests.append(method)
+        if type(method).__name__ == "GetFile":
+            from aiogram.types import File
+
+            return File(
+                file_id=method.file_id,
+                file_unique_id=method.file_id,  # type: ignore[return-value]
+                file_path=f"docs/{method.file_id}",
+            )
         chat_id = getattr(method, "chat_id", 0)
         return Message(  # type: ignore[return-value]
             message_id=len(self.requests),
@@ -44,8 +52,10 @@ class FakeTelegramSession(BaseSession):
             text=getattr(method, "text", None),
         ).as_(bot)
 
-    async def stream_content(self, *args: Any, **kwargs: Any):  # pragma: no cover
-        raise NotImplementedError
+    files: dict[str, bytes] = {}
+
+    async def stream_content(self, url: str, *args: Any, **kwargs: Any):  # noqa: ANN201
+        yield self.files[url.rsplit("/", 1)[-1]]
 
     async def close(self) -> None:
         pass
@@ -84,6 +94,15 @@ def bank(db: Database) -> MockBankProvider:
     return MockBankProvider(db)
 
 
+# Everything an invoice needs to know about a client (see invoices/completeness.py).
+CLIENT_DETAILS = {
+    "eik": "123456789",
+    "address": "10 Customer Ave",
+    "city": "Plovdiv",
+    "country": "Bulgaria",
+}
+
+
 class FakeParser:
     """Stands in for Claude: returns queued drafts and records what it was asked."""
 
@@ -91,14 +110,19 @@ class FakeParser:
 
     def __init__(self) -> None:
         self.queue: list = []
+        self.party_queue: list = []
         self.calls: list = []
 
-    async def parse(self, text, ctx):  # noqa: ANN001, ANN201
-        self.calls.append((text, ctx))
+    async def parse(self, text, ctx, attachments=()):  # noqa: ANN001, ANN201
+        self.calls.append((text, ctx, attachments))
         item = self.queue.pop(0)
         if isinstance(item, Exception):
             raise item
         return item
+
+    async def extract_party(self, text, known, wanted, attachments=()):  # noqa: ANN001, ANN201
+        self.calls.append(("party", text, wanted, attachments))
+        return self.party_queue.pop(0)
 
 
 class BotHarness:
@@ -134,17 +158,47 @@ class BotHarness:
         await self.send_raw(text, user_id)
         return [m.text for m in self.session.requests[self._before :] if hasattr(m, "text")]
 
-    async def send_raw(self, text: str, user_id: int = APPROVER_ID) -> list:
+    async def send_raw(
+        self,
+        text: str,
+        user_id: int = APPROVER_ID,
+        *,
+        document: tuple[str, str, bytes] | None = None,
+        photo: bytes | None = None,
+    ) -> list:
+        """Text message, or a document (filename, mime, bytes) / photo with `text` as caption."""
         before = self._before = len(self.session.requests)
         self._update_id += 1
         user = User(id=user_id, is_bot=False, first_name="Tester")
+        extra: dict[str, Any] = {"text": text, "entities": _command_entities(text)}
+        if document or photo is not None:
+            fid = f"file{self._update_id}"
+            self.session.files[fid] = document[2] if document else photo
+            extra = {"caption": text or None}
+            if document:
+                extra["document"] = {
+                    "file_id": fid,
+                    "file_unique_id": fid,
+                    "file_name": document[0],
+                    "mime_type": document[1],
+                    "file_size": len(document[2]),
+                }
+            else:
+                extra["photo"] = [
+                    {
+                        "file_id": fid,
+                        "file_unique_id": fid,
+                        "width": 800,
+                        "height": 600,
+                        "file_size": len(photo),
+                    }
+                ]
         msg = Message(
             message_id=self._update_id,
             date=datetime.now(UTC),
             chat=Chat(id=user_id, type="private"),
             from_user=user,
-            text=text,
-            entities=_command_entities(text),
+            **extra,
         )
         await self.dp.feed_update(self.bot, Update(update_id=self._update_id, message=msg))
         return self.session.requests[before:]

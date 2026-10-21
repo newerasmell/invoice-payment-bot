@@ -19,6 +19,8 @@ HELP = (
     "I prepare a draft PDF for approval; nothing is sent without your click.\n\n"
     "<b>Commands</b>\n"
     "/invoices - recent invoices\n"
+    "/payments - recent bank transfers\n"
+    "/rules - automatic invoicing rules\n"
     "/companies - company profiles\n"
     "/balance &lt;company&gt; - account balance\n"
     "/help - this message"
@@ -239,3 +241,61 @@ def transfers_list(rows) -> str:  # noqa: ANN001
             f"{escape((other or '-')[:30])} · {state}"
         )
     return "\n".join(out)
+
+
+# --- rules ----------------------------------------------------------------------------
+
+NO_RULES = "No rules yet. Create them in the admin panel (Rules)."
+
+
+def rule_draft_header(trigger: str, target: str, received, percent, amount, currency: str) -> str:  # noqa: ANN001
+    return (
+        f"🔁 <b>Rule</b>: {escape(trigger)} received {fmt_money(received, currency)} → "
+        f"{escape(target)} invoices {escape(trigger)} {fmt_money(amount, currency)} "
+        f"(−{percent.normalize():f}%)"
+    )
+
+
+def rules_list(rows) -> str:  # noqa: ANN001
+    out = ["<b>Rules</b>"]
+    for rule, trigger, target, description in rows:
+        state = "✅" if rule.enabled else "⏸"
+        pct = (rule.params or {}).get("percent", "1.5")
+        out.append(
+            f"{state} When <b>{escape(trigger)}</b> receives a payment → <b>{escape(target)}</b> "
+            f"invoices {escape(trigger)} for the amount −{escape(str(pct))}%"
+            + (f" ({escape(description[:40])})" if description else "")
+        )
+    return "\n".join(out)
+
+
+# --- completeness & documents ---------------------------------------------------------
+
+UNSUPPORTED_FILE = (
+    "I can read photos, PNG/JPG/WebP images and PDF files. That file type isn't supported."
+)
+FILE_TOO_BIG = "That file is too big (max {mb} MB)."
+COLLECT_NOTHING_FOUND = "I couldn't find that in your reply. {question}"
+
+
+def issuer_incomplete(code: str, gaps: list[str], link: str | None) -> str:
+    text = (
+        f"⛔ <b>{escape(code)}</b> can't issue invoices yet. Its profile is missing: "
+        f"<b>{escape(', '.join(gaps))}</b>.\nComplete it in the admin panel"
+    )
+    return text + (f": {escape(link)}" if link else ".")
+
+
+def ask_client_details(name: str, missing: str, known: dict[str, str]) -> str:
+    lines = [f"📋 To invoice <b>{escape(name)}</b> I still need: <b>{escape(missing)}</b>."]
+    if known:
+        lines.append("Known so far: " + escape("; ".join(f"{k}: {v}" for k, v in known.items())))
+    lines.append(
+        "Reply in text (e.g. <i>company no 12345678, 1 Main St, London, United Kingdom</i>) "
+        "or send a photo/PDF with their details. /cancel to stop."
+    )
+    return "\n".join(lines)
+
+
+def details_saved(name: str, fields: str) -> str:
+    return f"✅ Saved for {escape(name)}: {escape(fields)}."

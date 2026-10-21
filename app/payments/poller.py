@@ -21,7 +21,7 @@ async def poll_forever(
     while True:
         try:
             since = datetime.now(UTC) - timedelta(hours=settings.poll_lookback_hours)
-            events = await psync.sync(db, bank, since)
+            events = await psync.sync(db, bank, since, settings)
             if events:
                 log.info("poll: %d payment event(s)", len(events))
             await notify(bot, db, events)

@@ -17,6 +17,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.audit import audit
 from app.bank.base import BankProvider, Transfer
 from app.bank.paynetics import PayneticsProvider
+from app.config import Settings
 from app.db.models import (
     BankTransfer,
     Company,
@@ -30,6 +31,7 @@ from app.db.models import (
 )
 from app.db.session import Database
 from app.payments.matching import Candidate, MatchResult, match_transfer
+from app.rules.engine import RuleDraft, run_receipt_rules
 
 log = logging.getLogger(__name__)
 _sync_lock = asyncio.Lock()
@@ -39,11 +41,12 @@ _FINAL_NO_ACTION = {"canceled", "cancelled", "reversed"}
 
 @dataclass
 class PaymentEvent:
-    kind: str  # "paid" (auto, HIGH) | "review" (needs a human)
+    kind: str  # "paid" (auto, HIGH) | "review" (needs a human) | "rule_draft"
     transfer_id: int
     company_id: int | None
-    result: MatchResult
+    result: MatchResult | None = None
     candidates: list[Candidate] = field(default_factory=list)
+    rule_draft: RuleDraft | None = None
 
 
 def _norm(acc: str | None) -> str:
@@ -128,17 +131,27 @@ async def mark_paid(
     )
 
 
-async def process_transfer(session: AsyncSession, bt: BankTransfer) -> PaymentEvent | None:
+async def process_transfer(
+    session: AsyncSession, bt: BankTransfer, settings: Settings | None = None
+) -> list[PaymentEvent]:
     if bt.processed_at is not None:
-        return None
+        return []
     if bt.status in _FINAL_NO_ACTION:
         bt.processed_at = datetime.now(UTC)
-        return None
+        return []
     if bt.status != "processed":
-        return None  # new/pending: look again on the next sync
+        return []  # new/pending: look again on the next sync
     bt.processed_at = datetime.now(UTC)
     if bt.direction != TransferDirection.INCOMING or bt.company_id is None:
-        return None  # outgoing transfers are matched to payment instructions in M5
+        return []  # outgoing transfers are matched to payment instructions in M5
+    events = [await _match(session, bt)]
+    if settings is not None:
+        for d in await run_receipt_rules(session, settings, bt):
+            events.append(PaymentEvent("rule_draft", bt.id, bt.company_id, rule_draft=d))
+    return events
+
+
+async def _match(session: AsyncSession, bt: BankTransfer) -> PaymentEvent:
     candidates = await open_candidates(session, bt.company_id)
     result = match_transfer(
         bt.amount, bt.currency, bt.reference, bt.payer_name, bt.payer_account, candidates
@@ -171,28 +184,32 @@ async def process_transfer(session: AsyncSession, bt: BankTransfer) -> PaymentEv
     )
 
 
-async def ingest(db: Database, provider: str, transfers: list[Transfer]) -> list[PaymentEvent]:
+async def ingest(
+    db: Database, provider: str, transfers: list[Transfer], settings: Settings | None = None
+) -> list[PaymentEvent]:
     events: list[PaymentEvent] = []
     for t in transfers:
         async with db.session() as s:
             bt = await upsert_transfer(s, provider, t)
-            ev = await process_transfer(s, bt)
+            events += await process_transfer(s, bt, settings)
             await s.commit()
-        if ev:
-            events.append(ev)
     return events
 
 
-async def sync(db: Database, bank: BankProvider, since: datetime) -> list[PaymentEvent]:
+async def sync(
+    db: Database, bank: BankProvider, since: datetime, settings: Settings | None = None
+) -> list[PaymentEvent]:
     async with _sync_lock:
         if isinstance(bank, PayneticsProvider):
             async with db.session() as s:
                 bank.accounts_by_code = await _accounts_by_code(s)
         transfers = await bank.list_transfers(since)
-        return await ingest(db, bank.name, transfers)
+        return await ingest(db, bank.name, transfers, settings)
 
 
-async def sync_one(db: Database, bank: BankProvider, transfer_id: str) -> list[PaymentEvent]:
+async def sync_one(
+    db: Database, bank: BankProvider, transfer_id: str, settings: Settings | None = None
+) -> list[PaymentEvent]:
     """Webhook/dev path: always re-fetch from the bank, never trust the pushed payload."""
     async with _sync_lock:
         if isinstance(bank, PayneticsProvider):
@@ -200,7 +217,7 @@ async def sync_one(db: Database, bank: BankProvider, transfer_id: str) -> list[P
                 bank.accounts_by_code = await _accounts_by_code(s)
         views = getattr(bank, "get_transfer_views", None)
         transfers = await views(transfer_id) if views else [await bank.get_transfer(transfer_id)]
-        return await ingest(db, bank.name, transfers)
+        return await ingest(db, bank.name, transfers, settings)
 
 
 async def load_for_message(session: AsyncSession, ev: PaymentEvent):  # noqa: ANN201

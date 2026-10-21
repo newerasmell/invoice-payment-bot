@@ -20,15 +20,21 @@ from app.admin.auth import check_csrf, csrf_token, password_matches, require_adm
 from app.audit import audit
 from app.bank.base import BankError
 from app.bank.paynetics import PayneticsClient
-from app.companies import default_bank_account
+from app.companies import counterparty_for_company, default_bank_account
 from app.config import Settings
 from app.db.models import (
+    BankTransfer,
     Company,
     CompanyBankAccount,
+    Contract,
     Counterparty,
+    FeeRuleType,
     Invoice,
     InvoiceTemplate,
     NotePreset,
+    Rule,
+    RuleRun,
+    RuleType,
 )
 from app.invoices import service as inv_svc
 from app.invoices.options import FONTS, LAYOUTS, TemplateOptions
@@ -900,3 +906,148 @@ async def company_bank_test(
     return render(
         request, "company_form.html", company=company, values={}, errors={}, bank_test=result
     )
+
+
+# --- rules ------------------------------------------------------------------------------
+
+
+def _parse_rule(form: FormData, errors: f.FormErrors) -> dict[str, Any]:
+    def company_id(key: str) -> int | None:
+        raw = f.text(form, key)
+        if not raw or not raw.isdigit():
+            errors[key] = "Required"
+            return None
+        return int(raw)
+
+    data: dict[str, Any] = {
+        "trigger_company_id": company_id("trigger_company_id"),
+        "target_company_id": company_id("target_company_id"),
+        "percent": f.percent(form, "percent", errors),
+        "service_description": f.text(form, "service_description"),
+        "payment_terms_days": f.integer(form, "payment_terms_days", errors),
+        "include_internal": f.checkbox(form, "include_internal"),
+        "enabled": f.checkbox(form, "enabled"),
+    }
+    if not data["service_description"]:
+        errors["service_description"] = "Required: printed as the invoice line"
+    if data["trigger_company_id"] and data["trigger_company_id"] == data["target_company_id"]:
+        errors["target_company_id"] = "Must be a different company"
+    return data
+
+
+async def _save_rule(session: AsyncSession, rule: Rule, data: dict[str, Any]) -> None:
+    trigger = await session.get(Company, data["trigger_company_id"])
+    if trigger is None or await session.get(Company, data["target_company_id"]) is None:
+        raise HTTPException(400, "Unknown company")
+    client = await counterparty_for_company(session, trigger)
+    contract_id = (rule.params or {}).get("contract_id")
+    contract = await session.get(Contract, contract_id) if contract_id else None
+    if contract is None:
+        contract = Contract(
+            company_id=data["target_company_id"], counterparty_id=client.id, service_description=""
+        )
+        session.add(contract)
+    contract.company_id, contract.counterparty_id = data["target_company_id"], client.id
+    contract.service_description = data["service_description"]
+    contract.fee_rule, contract.fee_value = FeeRuleType.PERCENT, data["percent"]
+    contract.payment_terms_days = data["payment_terms_days"]
+    await session.flush()
+    rule.type = RuleType.INVOICE_ON_RECEIPT
+    rule.trigger_company_id, rule.target_company_id = trigger.id, data["target_company_id"]
+    rule.enabled = data["enabled"]
+    rule.params = {
+        "percent": str(data["percent"]),
+        "contract_id": contract.id,
+        "include_internal": data["include_internal"],
+    }
+
+
+async def _rule_form(
+    request: Request,
+    session: AsyncSession,
+    rule: Rule,
+    status: int = 200,
+    values: dict[str, Any] | None = None,
+    errors: dict[str, str] | None = None,
+) -> Response:
+    contract_id = (rule.params or {}).get("contract_id")
+    contract = await session.get(Contract, contract_id) if contract_id else None
+    runs = []
+    if rule.id:
+        runs = (
+            await session.execute(
+                select(RuleRun, BankTransfer, Invoice)
+                .join(BankTransfer, BankTransfer.id == RuleRun.transfer_id)
+                .outerjoin(Invoice, Invoice.id == RuleRun.invoice_id)
+                .where(RuleRun.rule_id == rule.id)
+                .order_by(RuleRun.id.desc())
+                .limit(20)
+            )
+        ).all()
+    return render(
+        request,
+        "rule_form.html",
+        status,
+        rule=rule,
+        contract=contract,
+        companies=await _companies(session),
+        values=values or {},
+        errors=errors or {},
+        runs=runs,
+    )
+
+
+@router.get("/rules")
+async def rules_index(request: Request, session: DB) -> Response:
+    rules = (await session.scalars(select(Rule).order_by(Rule.id))).all()
+    companies = {c.id: c for c in await _companies(session)}
+    contracts = {c.id: c for c in (await session.scalars(select(Contract))).all()}
+    return render(request, "rules.html", rules=rules, companies=companies, contracts=contracts)
+
+
+@router.get("/rules/new")
+async def rule_new(request: Request, session: DB) -> Response:
+    rule = Rule(enabled=True, params={"percent": "1.5"})
+    return await _rule_form(request, session, rule)
+
+
+@router.post("/rules/new")
+async def rule_create(request: Request, session: DB) -> Response:
+    form = await posted(request)
+    errors = f.FormErrors()
+    data = _parse_rule(form, errors)
+    rule = Rule(params={})
+    if errors:
+        return await _rule_form(request, session, rule, 422, dict(form), errors)
+    await _save_rule(session, rule, data)
+    session.add(rule)
+    await session.flush()
+    audit(session, ACTOR, "rule.created", f"rule:{rule.id}", rule.params)
+    await session.commit()
+    return redirect(f"/admin/rules/{rule.id}", "Rule created", request)
+
+
+@router.get("/rules/{rule_id}")
+async def rule_edit(request: Request, rule_id: int, session: DB) -> Response:
+    rule = await session.get(Rule, rule_id)
+    if rule is None:
+        raise HTTPException(404, "Rule not found")
+    return await _rule_form(request, session, rule)
+
+
+@router.post("/rules/{rule_id}")
+async def rule_update(request: Request, rule_id: int, session: DB) -> Response:
+    rule = await session.get(Rule, rule_id)
+    if rule is None:
+        raise HTTPException(404, "Rule not found")
+    form = await posted(request)
+    errors = f.FormErrors()
+    data = _parse_rule(form, errors)
+    if errors:
+        return await _rule_form(request, session, rule, 422, dict(form), errors)
+    await _save_rule(session, rule, data)
+    audit(
+        session, ACTOR, "rule.updated", f"rule:{rule.id}", {**rule.params, "enabled": rule.enabled}
+    )
+    await session.commit()
+    return redirect(f"/admin/rules/{rule.id}", "Rule saved", request)

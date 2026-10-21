@@ -1,0 +1,32 @@
+{% extends "base.html" %}
+{% set section = "rules" %}
+{% block title %}Rules{% endblock %}
+{% block content %}
+<div class="panel-head">
+  <div>
+    <h1>Rules</h1>
+    <p class="sub">Automatic drafts when a payment arrives. Every draft still needs approval in Telegram.</p>
+  </div>
+  <a class="btn" href="/admin/rules/new">+ New rule</a>
+</div>
+<div class="panel">
+  {% if rules %}
+  <table class="list">
+    <thead><tr><th>When</th><th>Then</th><th>Invoice line</th><th>Status</th><th></th></tr></thead>
+    <tbody>
+    {% for r in rules %}
+    {% set t = companies.get(r.trigger_company_id) %}{% set g = companies.get(r.target_company_id) %}
+    {% set c = contracts.get((r.params or {}).get("contract_id")) %}
+    <tr>
+      <td><span class="badge">{{ t.code if t else "?" }}</span> receives a payment of Y</td>
+      <td><span class="badge">{{ g.code if g else "?" }}</span> invoices <span class="badge">{{ t.code if t else "?" }}</span> for Y − {{ (r.params or {}).get("percent", "1.5") }}%</td>
+      <td class="small">{{ c.service_description if c else "" }}</td>
+      <td>{% if r.enabled %}<span class="badge ok">enabled</span>{% else %}<span class="badge grey">paused</span>{% endif %}</td>
+      <td style="text-align:right"><a class="btn secondary small" href="/admin/rules/{{ r.id }}">Edit</a></td>
+    </tr>
+    {% endfor %}
+    </tbody>
+  </table>
+  {% else %}<div class="empty">No rules yet.</div>{% endif %}
+</div>
+{% endblock %}

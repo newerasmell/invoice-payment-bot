@@ -21,7 +21,7 @@ from app.db.models import (
 )
 from app.invoices import service as svc
 from app.payments import sync as psync
-from tests.conftest import BotHarness
+from tests.conftest import CLIENT_DETAILS, BotHarness
 
 
 async def _sent_invoice(db, settings, amount: str = "1200", client: str = "Client Ltd") -> Invoice:  # noqa: ANN001
@@ -31,7 +31,7 @@ async def _sent_invoice(db, settings, amount: str = "1200", client: str = "Clien
         )
         c = await s.scalar(select(Counterparty).where(Counterparty.name == client))
         if c is None:
-            c = Counterparty(name=client)
+            c = Counterparty(name=client, **CLIENT_DETAILS)
             s.add(c)
             await s.flush()
         inv = await svc.create_draft(

@@ -8,6 +8,7 @@ from aiogram.filters import Command
 from aiogram.filters.callback_data import CallbackData
 from aiogram.types import CallbackQuery, InlineKeyboardButton, InlineKeyboardMarkup, Message
 from sqlalchemy import select
+from sqlalchemy.orm import aliased
 
 from app.audit import actor_tg, audit
 from app.bank.base import BankError, BankProvider
@@ -17,9 +18,11 @@ from app.db.models import (
     AllowedUser,
     BankTransfer,
     Company,
+    Contract,
     Invoice,
     InvoiceStatus,
     PaymentMatch,
+    Rule,
     UserRole,
 )
 from app.db.session import Database
@@ -69,6 +72,9 @@ async def notify(bot: Bot | None, db: Database, events: list[psync.PaymentEvent]
     if bot is None:
         return
     for ev in events:
+        if ev.kind == "rule_draft":
+            await _notify_rule_draft(bot, db, ev)
+            continue
         async with db.session() as s:
             bt, company = await psync.load_for_message(s, ev)
             if ev.kind == "paid":
@@ -81,6 +87,36 @@ async def notify(bot: Bot | None, db: Database, events: list[psync.PaymentEvent]
                 await bot.send_message(chat, text, reply_markup=kb)
             except Exception:  # a user who blocked the bot must not stop the others
                 log.warning("could not notify %s", chat, exc_info=True)
+
+
+async def _notify_rule_draft(bot: Bot, db: Database, ev: psync.PaymentEvent) -> None:
+    from app.bot.invoice_flow import send_draft_preview  # avoid an import cycle
+
+    d = ev.rule_draft
+    assert d is not None
+    async with db.session() as s:
+        rule = await s.get(Rule, d.rule_id)
+        trigger = await s.get(Company, rule.trigger_company_id)
+        target = await s.get(Company, rule.target_company_id)
+    header = texts.rule_draft_header(
+        trigger.code,
+        target.code,
+        d.received,
+        d.percent,
+        d.amount,
+        (await _currency(db, ev.transfer_id)),
+    )
+    for chat in await _recipients(db, target):
+        try:
+            await send_draft_preview(bot, chat, db, d.invoice_id, header=header)
+        except Exception:
+            log.warning("could not send rule draft to %s", chat, exc_info=True)
+
+
+async def _currency(db: Database, transfer_id: int) -> str:
+    async with db.session() as s:
+        bt = await s.get(BankTransfer, transfer_id)
+        return bt.currency if bt else "EUR"
 
 
 async def on_pay(
@@ -129,9 +165,8 @@ async def cmd_payments(
 ) -> None:
     # Pull fresh data first so /payments is current even between polling rounds.
     try:
-        events = await psync.sync(
-            db, bank, datetime.now(UTC) - timedelta(hours=settings.poll_lookback_hours)
-        )
+        since = datetime.now(UTC) - timedelta(hours=settings.poll_lookback_hours)
+        events = await psync.sync(db, bank, since, settings)
         await notify(bot, db, events)
     except BankError as e:
         await message.answer(f"❗ {texts.escape(str(e))}")
@@ -158,8 +193,24 @@ async def cmd_payments(
     await message.answer(texts.transfers_list(view))
 
 
+async def cmd_rules(message: Message, db: Database) -> None:
+    trigger, target = aliased(Company), aliased(Company)
+    async with db.session() as s:
+        rows = (
+            await s.execute(
+                select(Rule, trigger.code, target.code, Contract.service_description)
+                .join(trigger, trigger.id == Rule.trigger_company_id)
+                .join(target, target.id == Rule.target_company_id)
+                .outerjoin(Contract, Contract.id == Rule.params["contract_id"].as_integer())
+                .order_by(Rule.id)
+            )
+        ).all()
+    await message.answer(texts.rules_list(rows) if rows else texts.NO_RULES)
+
+
 def make_router() -> Router:
     r = Router(name="payments")
     r.message.register(cmd_payments, Command("payments"))
+    r.message.register(cmd_rules, Command("rules"))
     r.callback_query.register(on_pay, Pay.filter())
     return r

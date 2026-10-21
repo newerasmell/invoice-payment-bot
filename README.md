@@ -27,7 +27,12 @@ from code: transfers are executed by a human in the bank panel. See `CLAUDE.md` 
   `POST /webhooks/paynetics` is a hint only (the transfer is always re-fetched). `/payments`
   lists recent transfers. Admin → company → **Bank API → Test connection** shows the
   company's Paynetics accounts and which are linked.
-- Next: public invoice-request form for clients, M4 rules, M5 payment instructions.
+- **M4 (done):** rules (Admin → **Rules**): "when X receives a payment of Y, Z invoices X for
+  Y − p%" (default 1.5%, half-up to cents) with the contract's service description as the
+  invoice line. The draft goes to Telegram with Approve / Edit / Reject. Payments from our own
+  companies do not trigger rules unless enabled per rule; each payment fires a rule at most once
+  (`rule_runs`). `/rules` lists them.
+- Next: M5 (inbox + payment instructions X → Z → G), public invoice-request form, M6.
 
 ### Connecting Paynetics
 
@@ -85,6 +90,7 @@ configured. Only approvers can approve; operators can draft.
 | *any text* | draft an invoice from free text (needs `ANTHROPIC_API_KEY`) |
 | `/invoices` | last 10 invoices, with Send buttons for approved ones |
 | `/payments` | check the bank now and list recent transfers with their match |
+| `/rules` | automatic invoicing rules |
 | `/cancel` | stop editing a draft |
 | `/balance <company>` | balance of the company's default account |
 | `/dev_simulate_incoming <company> <amount> <payer> [reference]` | mock bank only |

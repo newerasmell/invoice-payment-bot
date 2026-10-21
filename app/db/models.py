@@ -383,6 +383,22 @@ class Rule(Timestamped, Base):
     enabled: Mapped[bool] = mapped_column(Boolean, default=True)
 
 
+class RuleRun(Base):
+    """One evaluation of a rule for one bank transfer; makes rules fire at most once."""
+
+    __tablename__ = "rule_runs"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    rule_id: Mapped[int] = mapped_column(ForeignKey("rules.id"))
+    transfer_id: Mapped[int] = mapped_column(ForeignKey("bank_transfers.id"))
+    invoice_id: Mapped[int | None] = mapped_column(ForeignKey("invoices.id"))
+    status: Mapped[str] = mapped_column(String(16))  # drafted | skipped | failed
+    detail: Mapped[str | None] = mapped_column(Text)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+
+    __table_args__ = (UniqueConstraint("rule_id", "transfer_id"),)
+
+
 # --- Access & audit -----------------------------------------------------------
 
 

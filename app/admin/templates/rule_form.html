@@ -1,0 +1,63 @@
+{% extends "base.html" %}
+{% from "_macros.html" import field, csrf_input %}
+{% set section = "rules" %}
+{% set is_new = rule.id is none %}
+{% macro sel(name, current) %}
+<select id="f-{{ name }}" name="{{ name }}">
+  <option value="">Choose…</option>
+  {% for c in companies %}<option value="{{ c.id }}" {{ 'selected' if (values.get(name) or (current|string if current else '')) == c.id|string }}>{{ c.code }} - {{ c.legal_name or c.name }}</option>{% endfor %}
+</select>
+{% endmacro %}
+{% block title %}{{ "New rule" if is_new else "Rule #%d" % rule.id }}{% endblock %}
+{% block content %}
+<div class="crumbs"><a href="/admin/rules">Rules</a> /</div>
+<h1>{{ "New rule" if is_new else "Rule #%d" % rule.id }}</h1>
+<p class="sub">When the first company receives a payment of Y, the second company drafts an invoice to it for Y minus the percentage. The draft goes to Telegram for approval.</p>
+{% if errors %}<div class="alert">Please fix the highlighted fields.</div>{% endif %}
+<form method="post" class="panel" action="{{ '/admin/rules/new' if is_new else '/admin/rules/%d' % rule.id }}">
+  {{ csrf_input(csrf) }}
+  <div class="form-grid">
+    <div class="field {{ 'has-error' if errors.get('trigger_company_id') }}">
+      <label for="f-trigger_company_id">When this company receives a payment</label>
+      {{ sel("trigger_company_id", rule.trigger_company_id) }}
+      {% if errors.get('trigger_company_id') %}<div class="error">{{ errors.trigger_company_id }}</div>{% endif %}
+    </div>
+    <div class="field {{ 'has-error' if errors.get('target_company_id') }}">
+      <label for="f-target_company_id">this company invoices it</label>
+      {{ sel("target_company_id", rule.target_company_id) }}
+      {% if errors.get('target_company_id') %}<div class="error">{{ errors.target_company_id }}</div>{% endif %}
+    </div>
+    {{ field("percent", "Deduct (%)", values.get("percent") or (rule.params or {}).get("percent", "1.5"), errors, hint="Invoice total = payment − this percentage, rounded half-up to cents") }}
+    {{ field("payment_terms_days", "Payment terms (days)", values.get("payment_terms_days") or (contract.payment_terms_days if contract else 14), errors, type="number", attrs='min="0"') }}
+    {{ field("service_description", "Invoice line (service description)", values.get("service_description") or (contract.service_description if contract else ""), errors, type="textarea", cls="full", hint="Printed as the line on the invoice, e.g. “Marketing services under agreement 12/2026”") }}
+    <div class="field full">
+      {% set inc = (values.get('include_internal') == 'on') if values else (rule.params or {}).get('include_internal') %}
+      <label class="check"><input type="checkbox" name="include_internal" {{ 'checked' if inc }}> Also for payments from our own companies</label>
+      <div class="hint">Off by default, so money moving X → Z → G never triggers new invoices in a loop.</div>
+      {% set en = (values.get('enabled') == 'on') if values else rule.enabled %}
+      <label class="check"><input type="checkbox" name="enabled" {{ 'checked' if en }}> Enabled</label>
+    </div>
+  </div>
+  <div class="actions" style="margin-top:18px">
+    <button class="btn" type="submit">{{ "Create rule" if is_new else "Save rule" }}</button>
+    <a class="btn secondary" href="/admin/rules">Cancel</a>
+  </div>
+</form>
+{% if runs %}
+<div class="panel">
+  <h2>Recent runs</h2>
+  <table class="list">
+    <thead><tr><th>When</th><th>Payment</th><th>Result</th></tr></thead>
+    <tbody>
+    {% for run, bt, inv in runs %}
+    <tr>
+      <td class="small muted">{{ run.created_at.strftime("%d.%m.%Y %H:%M") }}</td>
+      <td>{{ "{:,.2f}".format(bt.amount) }} {{ bt.currency }} from {{ bt.payer_name or "?" }}</td>
+      <td>{% if run.status == "drafted" %}<span class="badge ok">drafted</span> {% if inv %}<a href="/admin/invoices/{{ inv.id }}/pdf" target="_blank">{{ inv.number or "draft #%d" % inv.id }}</a> · {{ "{:,.2f}".format(inv.amount_gross) }}{% endif %}{% else %}<span class="badge grey">{{ run.status }}</span> <span class="small muted">{{ run.detail or "" }}</span>{% endif %}</td>
+    </tr>
+    {% endfor %}
+    </tbody>
+  </table>
+</div>
+{% endif %}
+{% endblock %}

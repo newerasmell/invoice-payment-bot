@@ -33,7 +33,7 @@ def _transfer_ids(body: Any) -> list[str]:
 async def _handle(app: Any, ids: list[str]) -> None:
     for tid in ids:
         try:
-            events = await psync.sync_one(app.state.db, app.state.bank, tid)
+            events = await psync.sync_one(app.state.db, app.state.bank, tid, app.state.settings)
             await payments_flow.notify(getattr(app.state, "bot", None), app.state.db, events)
         except Exception:
             log.exception("webhook: could not process transfer %s", tid)

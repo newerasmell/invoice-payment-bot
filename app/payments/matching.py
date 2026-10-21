@@ -34,6 +34,11 @@ def _norm_text(s: str | None) -> str:
     return re.sub(r"[^0-9a-z]+", "", (s or "").casefold())
 
 
+def norm_company_name(s: str | None) -> str:
+    """Lower-case alphanumerics without legal suffixes ("Nove Solida Ltd." -> "novesolida")."""
+    return _norm_name(s)
+
+
 def _norm_name(s: str | None) -> str:
     return _norm_text(_LEGAL_SUFFIXES.sub(" ", s or ""))
 

@@ -13,6 +13,8 @@ from app.llm.parser import InvoiceParser
 
 BOT_COMMANDS = [
     BotCommand(command="invoices", description="Recent invoices"),
+    BotCommand(command="payments", description="Recent bank transfers"),
+    BotCommand(command="rules", description="Automatic invoicing rules"),
     BotCommand(command="companies", description="Company profiles"),
     BotCommand(command="balance", description="Account balance: /balance <company>"),
     BotCommand(command="cancel", description="Cancel the current edit"),

@@ -7,7 +7,7 @@ from sqlalchemy.orm import selectinload
 from app.db.models import Company, Counterparty, InvoiceDelivery, InvoiceStatus
 from app.delivery import service as dsvc
 from app.invoices import service as svc
-from tests.conftest import FakeTelegramSession
+from tests.conftest import CLIENT_DETAILS, FakeTelegramSession
 
 
 async def _approved(db, settings, **client_kw):  # noqa: ANN001, ANN003, ANN202
@@ -15,7 +15,7 @@ async def _approved(db, settings, **client_kw):  # noqa: ANN001, ANN003, ANN202
         issuer = await s.scalar(
             select(Company).options(selectinload(Company.bank_accounts)).where(Company.code == "X")
         )
-        client = Counterparty(name="Client Ltd", contact_name="Ana", **client_kw)
+        client = Counterparty(name="Client Ltd", contact_name="Ana", **CLIENT_DETAILS, **client_kw)
         s.add(client)
         await s.flush()
         inv = await svc.create_draft(

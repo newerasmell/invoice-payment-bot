@@ -5,7 +5,7 @@ from decimal import Decimal
 import pytest
 from fastapi.testclient import TestClient
 from pydantic import SecretStr
-from sqlalchemy import create_engine, select
+from sqlalchemy import create_engine, func, select
 from sqlalchemy.orm import Session
 
 from app.admin.forms import iban_is_valid
@@ -456,3 +456,45 @@ def test_bank_api_panel(client: TestClient, sync_db: Session, monkeypatch) -> No
     html = post(client, f"/admin/companies/{cid}/bank-test", {}, token).text
     assert "Connected as <b>Company X Ltd</b>" in html
     assert "41499999999" in html and html.count('badge ok">yes') == 1
+
+
+def test_rules_admin(client: TestClient, sync_db: Session) -> None:
+    from app.db.models import Contract, Counterparty, Rule
+
+    token = login(client)
+    x, z = company_id(sync_db, "X"), company_id(sync_db, "Z")
+    base = {
+        "trigger_company_id": str(x),
+        "target_company_id": str(z),
+        "percent": "1.5",
+        "payment_terms_days": "10",
+        "service_description": "Marketing services",
+        "enabled": "on",
+    }
+    r = post(client, "/admin/rules/new", {**base, "target_company_id": str(x)}, token)
+    assert r.status_code == 422 and "different company" in r.text
+    r = post(client, "/admin/rules/new", {**base, "service_description": ""}, token)
+    assert r.status_code == 422 and "invoice line" in r.text
+    r = post(client, "/admin/rules/new", base, token)
+    assert r.status_code == 303
+    rule = sync_db.scalar(select(Rule))
+    contract = sync_db.get(Contract, rule.params["contract_id"])
+    cp = sync_db.get(Counterparty, contract.counterparty_id)
+    assert rule.params["percent"] == "1.50" and rule.enabled
+    assert contract.company_id == z and cp.company_id == x and cp.name == "Company X Ltd"
+    assert contract.service_description == "Marketing services"
+
+    r = post(
+        client,
+        f"/admin/rules/{rule.id}",
+        {**base, "percent": "2", "service_description": "Media buying"},
+        token,
+    )
+    assert r.status_code == 303
+    sync_db.expire_all()
+    rule = sync_db.get(Rule, rule.id)
+    assert rule.params["percent"] == "2.00" and rule.enabled is not False
+    assert sync_db.scalar(select(func.count(Contract.id))) == 1  # contract updated, not duplicated
+    assert sync_db.get(Contract, rule.params["contract_id"]).service_description == "Media buying"
+    page = client.get("/admin/rules").text
+    assert "Y − 2.00%" in page and "Media buying" in page

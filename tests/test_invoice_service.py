@@ -8,6 +8,7 @@ from sqlalchemy.orm import selectinload
 
 from app.db.models import AuditLog, Company, Counterparty, InvoiceStatus
 from app.invoices import service as svc
+from tests.conftest import CLIENT_DETAILS
 
 
 async def _setup(db, code: str = "X"):  # noqa: ANN001, ANN202
@@ -16,7 +17,10 @@ async def _setup(db, code: str = "X"):  # noqa: ANN001, ANN202
             select(Company).options(selectinload(Company.bank_accounts)).where(Company.code == code)
         )
         client = Counterparty(
-            name="Client Ltd", eik="123", email="ap@client.example", delivery_channels=["email"]
+            name="Client Ltd",
+            email="ap@client.example",
+            delivery_channels=["email"],
+            **CLIENT_DETAILS,
         )
         s.add(client)
         await s.commit()

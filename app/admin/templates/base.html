@@ -13,6 +13,7 @@
     <a href="/admin" class="{{ 'active' if section == 'companies' }}">Companies</a>
     <a href="/admin/clients" class="{{ 'active' if section == 'clients' }}">Clients</a>
     <a href="/admin/invoices" class="{{ 'active' if section == 'invoices' }}">Invoices</a>
+    <a href="/admin/rules" class="{{ 'active' if section == 'rules' }}">Rules</a>
     <a href="/admin/notes" class="{{ 'active' if section == 'notes' }}">Note presets</a>
     <form method="post" action="/admin/logout">
       <input type="hidden" name="csrf" value="{{ csrf }}">

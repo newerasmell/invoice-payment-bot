@@ -224,6 +224,31 @@ Write pytest tests for: amount math (1.5% rounding), matching logic (HIGH/MEDIUM
   unverified until real keys: the `created`/`updated` format and the exact `transferType` values
   (parser is defensive and infers direction from our account numbers).
 
+## 10b4. M4 implementation notes
+- `rules/engine.py::run_receipt_rules` runs inside `payments/sync.process_transfer` the first time
+  an incoming transfer to the trigger company is processed. It only creates a DRAFT (source
+  `rule`) from target → trigger company; the client profile for our own company comes from
+  `companies.counterparty_for_company`. `RuleRun` (unique rule+transfer) makes it fire once and
+  records skipped/failed runs. Payments from our own companies are skipped unless the rule's
+  `include_internal` is set (prevents X → Z → G loops). Rule params live in `Rule.params`
+  (`percent`, `contract_id`, `include_internal`); the invoice line is `Contract.service_description`.
+- Amounts with VAT: rule drafts use `include_vat=True`, so the gross equals Y − p%; with a
+  non-zero VAT rate the gross can differ by 0.01 because VAT is rounded on the net.
+
+## 10b5. Required data before an invoice exists (user requirement, 2026-10-21)
+- No draft is created and nothing can be approved unless the issuer has legal name, company
+  number, street address, city, country and a bank account in the invoice currency, and the
+  client has full legal name, company number, street address, city and country
+  (`invoices/completeness.py`; `service.approve` re-checks). Missing client data is collected in
+  the chat (Flow.collecting: text, photo or PDF → `parser.extract_party`); missing issuer data
+  must be fixed in the admin panel.
+- A client typed by a short name/abbreviation is never trusted as the legal name: a new client
+  without an extracted legal name gets "full legal name" asked first.
+- Our own companies can be clients (by code, e.g. "NSOL", or name) via
+  `companies.counterparty_for_company`; the parser gets all our companies and known clients.
+- Telegram photos and documents (JPEG/PNG/WebP/GIF/PDF, ≤ 10 MB) are passed to Claude as
+  image/document blocks; effort is `medium` when attachments are present.
+
 ## 10c. Deployment and migrations
 - Production is a single Render web service from `render.yaml` (Blueprint), SQLite on a
   persistent disk at `/var/data`, no staging. Every push to `main` deploys to production.
