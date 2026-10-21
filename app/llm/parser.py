@@ -13,7 +13,7 @@ from decimal import Decimal
 from typing import Any, Literal
 
 import anthropic
-from pydantic import BaseModel, Field, ValidationError, field_validator
+from pydantic import BaseModel, Field, ValidationError, field_validator, model_validator
 
 from app.money import InvalidAmount, to_money
 
@@ -29,6 +29,8 @@ class ParserError(RuntimeError):
 
 
 class DraftLine(BaseModel):
+    _blanks = model_validator(mode="before")(classmethod(lambda cls, d: _blank_to_none(d)))
+
     description: str = Field(min_length=1, max_length=500)
     quantity: Decimal = Decimal("1")
     unit_price: Decimal
@@ -66,6 +68,8 @@ class PartyDetails(BaseModel):
     email: str | None = None
     contact_name: str | None = None
 
+    _blanks = model_validator(mode="before")(classmethod(lambda cls, d: _blank_to_none(d)))
+
     def filled(self) -> dict[str, str]:
         return {
             k: v.strip() for k, v in self.model_dump().items() if isinstance(v, str) and v.strip()
@@ -73,6 +77,8 @@ class PartyDetails(BaseModel):
 
 
 class InvoiceDraft(BaseModel):
+    _blanks = model_validator(mode="before")(classmethod(lambda cls, d: _blank_to_none(d)))
+
     intent: Literal["invoice", "other"]
     issuer_code: str | None = None  # one of our company codes, or None if unclear
     issuer_text: str | None = None  # issuer as the user wrote it
@@ -109,8 +115,15 @@ class InvoiceDraft(BaseModel):
         return d
 
 
-def _nullable(t: str) -> dict[str, Any]:
-    return {"anyOf": [{"type": t}, {"type": "null"}]}
+# Structured outputs cap the number of union-typed (nullable) fields, so every optional value is
+# a plain string and "" means "not provided"; _blank_to_none turns it back into None.
+_STR: dict[str, Any] = {"type": "string"}
+
+
+def _blank_to_none(data: Any) -> Any:
+    if isinstance(data, dict):
+        return {k: (None if isinstance(v, str) and not v.strip() else v) for k, v in data.items()}
+    return data
 
 
 _PARTY_KEYS = [
@@ -125,7 +138,7 @@ _PARTY_KEYS = [
 ]
 PARTY_SCHEMA: dict[str, Any] = {
     "type": "object",
-    "properties": {k: _nullable("string") for k in _PARTY_KEYS},
+    "properties": {k: _STR for k in _PARTY_KEYS},
     "required": _PARTY_KEYS,
     "additionalProperties": False,
 }
@@ -135,14 +148,14 @@ DRAFT_SCHEMA: dict[str, Any] = {
     "type": "object",
     "properties": {
         "intent": {"type": "string", "enum": ["invoice", "other"]},
-        "issuer_code": _nullable("string"),
-        "issuer_text": _nullable("string"),
-        "client_id": _nullable("integer"),
-        "client_company_code": _nullable("string"),
-        "client_text": _nullable("string"),
-        "client_details": {"anyOf": [PARTY_SCHEMA, {"type": "null"}]},
-        "currency": _nullable("string"),
-        "vat_rate": _nullable("string"),
+        "issuer_code": _STR,
+        "issuer_text": _STR,
+        "client_id": _STR,
+        "client_company_code": _STR,
+        "client_text": _STR,
+        "client_details": PARTY_SCHEMA,
+        "currency": _STR,
+        "vat_rate": _STR,
         "amounts_include_vat": {"type": "boolean"},
         "lines": {
             "type": "array",
@@ -152,15 +165,15 @@ DRAFT_SCHEMA: dict[str, Any] = {
                     "description": {"type": "string"},
                     "quantity": {"type": "string"},
                     "unit_price": {"type": "string"},
-                    "unit": _nullable("string"),
+                    "unit": _STR,
                 },
                 "required": ["description", "quantity", "unit_price", "unit"],
                 "additionalProperties": False,
             },
         },
-        "due_in_days": _nullable("integer"),
-        "notes": _nullable("string"),
-        "unclear": _nullable("string"),
+        "due_in_days": _STR,
+        "notes": _STR,
+        "unclear": _STR,
     },
     "required": [
         "intent",
@@ -188,31 +201,34 @@ Rules:
 document to invoice from (or, when a current draft is given, asks to change it). Otherwise \
 "other" and leave the rest empty.
 - issuer_code: the code of OUR company that issues the invoice, chosen only from "Our companies". \
-Match codes and names loosely (case, abbreviations, missing "Ltd"). If unclear, null and copy the \
+Match codes and names loosely (case, abbreviations, missing "Ltd"). If unclear, "" and copy the \
 wording to issuer_text.
 - The client may be a known client (client_id from "Known clients") or one of OUR companies \
 (client_company_code from "Our companies", e.g. "NSOL" or "Nove Solida" -> that code). Match \
-loosely but only when it clearly refers to that entry; otherwise leave both null.
+loosely but only when it clearly refers to that entry; otherwise leave both "".
 - client_text: the client as the operator wrote it (or as named in the document).
 - client_details: every detail about the CLIENT that appears in the message or documents \
 (legal name, company/registration number, VAT number, street address, city, country, email, \
-contact person). Copy values exactly; never guess or invent. Null for anything not present.
+contact person). Copy values exactly; never guess or invent. "" for anything not present.
 - lines: one entry per billed item. unit_price is the price of ONE unit as a plain decimal \
 string with a dot ("1200.00"); quantity is a decimal string ("1", "3"). "98k" means 98000. \
 Never invent amounts: if no amount is given, return no lines and explain in unclear.
 - amounts_include_vat: true only when it says the amount includes VAT ("incl. VAT", "gross", \
 "with VAT"). Otherwise false (amounts are net).
-- currency: ISO code if stated or shown (EUR, USD, GBP, BGN...), else null. vat_rate: percentage \
-as a string only if stated ("0", "9", "20"), else null. due_in_days: only if stated.
-- notes: any extra text the operator wants printed on the invoice, else null.
-- unclear: one short sentence about anything ambiguous or missing, else null.
+- currency: ISO code if stated or shown (EUR, USD, GBP, BGN...), else "". vat_rate: percentage \
+as a string only if stated ("0", "9", "20"), else "". due_in_days: only if stated.
+- notes: any extra text the operator wants printed on the invoice, else "".
+- unclear: one short sentence about anything ambiguous or missing, else empty.
+- Every text field is a string: use "" (empty string) for anything unknown or not applicable, \
+never the word "null". client_id and due_in_days are digits as a string, or "".
 - When a current draft is provided, apply the requested change to it and return the full \
 updated draft (keep everything not mentioned)."""
 
 PARTY_SYSTEM = """You extract a company's details from an operator's reply and any attached \
-images or PDFs. Return only what is actually present; copy values exactly; never guess. \
-company_number is the registration number (EIK, Companies House number, etc.), not the VAT \
-number. Split a full address into street address, city and country when possible."""
+images or PDFs. Return only what is actually present; copy values exactly; never guess; \
+use "" for anything not present. company_number is the registration number (EIK, \
+Companies House number, etc.), not the VAT number. Split a full address into street \
+address, city and country when possible."""
 
 
 @dataclass(frozen=True)

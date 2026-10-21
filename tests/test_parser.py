@@ -111,3 +111,59 @@ async def test_unavailable_without_key() -> None:
     assert not p.available
     with pytest.raises(ParserUnavailable):
         await p.parse("x", CTX)
+
+
+def _unions(x: object) -> int:
+    if isinstance(x, dict):
+        own = 1 if "anyOf" in x or isinstance(x.get("type"), list) else 0
+        return own + sum(_unions(v) for v in x.values())
+    if isinstance(x, list):
+        return sum(_unions(v) for v in x)
+    return 0
+
+
+def test_schema_has_no_union_types() -> None:
+    """The API rejects schemas with many nullable/anyOf fields (it hit 20 in production);
+    optional values are plain strings where "" means not provided."""
+    from app.llm.parser import PARTY_SCHEMA
+
+    assert _unions(DRAFT_SCHEMA) == 0 and _unions(PARTY_SCHEMA) == 0
+
+
+def test_blank_strings_mean_none() -> None:
+    blank = {
+        k: ""
+        for k in (
+            "name",
+            "company_number",
+            "vat_id",
+            "address",
+            "city",
+            "country",
+            "email",
+            "contact_name",
+        )
+    }
+    raw = {
+        **GOOD,
+        "issuer_code": "",
+        "client_id": "",
+        "client_company_code": "NSOL",
+        "currency": "",
+        "vat_rate": "",
+        "due_in_days": "",
+        "client_details": blank,
+        "lines": [{"description": "Marketing", "quantity": "1", "unit_price": "98000", "unit": ""}],
+    }
+    d = InvoiceDraft.model_validate(raw)
+    assert (d.issuer_code, d.client_id, d.currency, d.vat_rate, d.due_in_days) == (
+        None,
+        None,
+        None,
+        None,
+        None,
+    )
+    assert d.client_company_code == "NSOL" and d.client_details.filled() == {}
+    assert d.lines[0].unit is None
+    d2 = InvoiceDraft.model_validate({**GOOD, "client_id": "7", "due_in_days": "30"})
+    assert (d2.client_id, d2.due_in_days) == (7, 30)
