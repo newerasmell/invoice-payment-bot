@@ -104,13 +104,9 @@ def _apply_totals(inv: Invoice) -> None:
     inv.amount_gross = inv.amount_net + inv.amount_vat
 
 
-def _check_limit(inv: Invoice, settings: Settings) -> None:
-    if inv.amount_gross > settings.max_invoice_amount:
-        raise InvoiceError(
-            f"Total {inv.amount_gross:,.2f} {inv.currency} is above the limit of "
-            f"{settings.max_invoice_amount:,.2f}. Large invoices need a second approver "
-            "(not available yet)."
-        )
+def needs_two_approvals(inv: Invoice, settings: Settings) -> bool:
+    """Above MAX_INVOICE_AMOUNT an invoice needs two different approvers."""
+    return abs(inv.amount_gross) > settings.max_invoice_amount
 
 
 async def load_bundle(session: AsyncSession, invoice_id: int) -> InvoiceBundle:
@@ -168,7 +164,6 @@ async def create_draft(
         lines=_build_lines(lines, include_vat, rate),
     )
     _apply_totals(inv)
-    _check_limit(inv, settings)
     session.add(inv)
     await session.flush()
     audit(
@@ -219,7 +214,7 @@ async def update_draft(
     await session.flush()
     inv.lines.extend(_build_lines(lines, include_vat, inv.vat_rate))
     _apply_totals(inv)
-    _check_limit(inv, settings)
+    inv.first_approved_by = inv.first_approved_at = None  # changed: approve afresh
     audit(
         session,
         actor,
@@ -324,21 +319,123 @@ async def render_bundle_pdf(session: AsyncSession, b: InvoiceBundle) -> bytes:
         no_vat_note=snap.get("no_vat_note", ""),
         logo_url=logo_url,
         is_draft=inv.status == InvoiceStatus.DRAFT,
+        credit_for=await credit_for_label(session, inv),
     )
-    html = render_invoice_html(
-        view, snap.get("layout", "classic"), TemplateOptions.parse_lenient(snap.get("options"))
-    )
+    options = TemplateOptions.parse_lenient(snap.get("options"))
+    if view.is_credit:
+        options = options.model_copy(update={"title": "CREDIT NOTE"})
+    html = render_invoice_html(view, snap.get("layout", "classic"), options)
     return await html_to_pdf(html)
 
 
 def pdf_filename(inv: Invoice) -> str:
-    return f"invoice-{inv.number}.pdf" if inv.number else f"draft-{inv.id}.pdf"
+    kind = "credit-note" if inv.kind == CREDIT_NOTE else "invoice"
+    return f"{kind}-{inv.number}.pdf" if inv.number else f"draft-{inv.id}.pdf"
 
 
 def public_url(settings: Settings, inv: Invoice) -> str | None:
     if not inv.public_token or not settings.public_base_url:
         return None
     return f"{settings.public_base_url.rstrip('/')}/i/{inv.public_token}"
+
+
+# --- credit notes -----------------------------------------------------------------------
+
+CREDIT_NOTE = "credit_note"
+CREDITABLE = (InvoiceStatus.APPROVED, InvoiceStatus.SENT, InvoiceStatus.PAID)
+
+
+async def open_credit_note(session: AsyncSession, invoice_id: int) -> Invoice | None:
+    return await session.scalar(
+        select(Invoice).where(
+            Invoice.kind == CREDIT_NOTE,
+            Invoice.credited_invoice_id == invoice_id,
+            Invoice.status != InvoiceStatus.CANCELLED,
+        )
+    )
+
+
+async def create_credit_note(
+    session: AsyncSession, original: InvoiceBundle, *, reason: str, created_by: int | None
+) -> Invoice:
+    """A DRAFT credit note for the full amount of an issued invoice. It is numbered in the
+    issuer's normal series when approved (accountant to confirm the series and wording)."""
+    orig = original.invoice
+    if orig.kind == CREDIT_NOTE:
+        raise InvoiceError("A credit note can't be credited")
+    if orig.status not in CREDITABLE or not orig.number:
+        raise InvoiceError("Only issued invoices can be credited; reject a draft instead")
+    existing = await open_credit_note(session, orig.id)
+    if existing:
+        raise InvoiceError(
+            f"Invoice {orig.number} already has credit note "
+            + (existing.number or f"draft #{existing.id}")
+        )
+    note = Invoice(
+        kind=CREDIT_NOTE,
+        credited_invoice_id=orig.id,
+        issuer_id=orig.issuer_id,
+        counterparty_id=orig.counterparty_id,
+        template_id=orig.template_id,
+        bank_account_id=orig.bank_account_id,
+        description=f"Credit note to invoice {orig.number}",
+        notes=reason.strip() or None,
+        vat_rate=orig.vat_rate,
+        currency=orig.currency,
+        issue_date=date.today(),
+        due_date=None,
+        status=InvoiceStatus.DRAFT,
+        source=orig.source,
+        created_by=created_by,
+        lines=[
+            InvoiceLine(
+                position=li.position,
+                description=li.description,
+                quantity=li.quantity,
+                unit=li.unit,
+                unit_price=-li.unit_price,
+                amount=-li.amount,
+            )
+            for li in orig.lines
+        ],
+    )
+    _apply_totals(note)
+    session.add(note)
+    await session.flush()
+    audit(
+        session,
+        f"tg:{created_by}" if created_by else "system",
+        "credit_note.drafted",
+        f"invoice:{note.id}",
+        {"credits": orig.number, "gross": str(note.amount_gross), "reason": reason},
+    )
+    return note
+
+
+async def _credit_original(session: AsyncSession, note: Invoice, actor_tg: int) -> None:
+    orig = await session.get(Invoice, note.credited_invoice_id)
+    if orig is None or orig.status not in CREDITABLE:
+        raise InvoiceError("The credited invoice is no longer open")
+    if orig.snapshot:  # the credit note names the same parties as the invoice it corrects
+        note.snapshot = {**orig.snapshot, **{k: note.snapshot[k] for k in ("layout", "options")}}
+    if orig.status != InvoiceStatus.PAID:  # a paid one stays PAID: the refund is manual
+        orig.status = InvoiceStatus.CANCELLED
+    audit(
+        session,
+        f"tg:{actor_tg}",
+        "invoice.credited",
+        f"invoice:{orig.id}",
+        {"number": orig.number, "status": orig.status.value, "credit_note_id": note.id},
+    )
+
+
+async def credit_for_label(session: AsyncSession, inv: Invoice) -> str:
+    if inv.kind != CREDIT_NOTE or not inv.credited_invoice_id:
+        return ""
+    orig = await session.get(Invoice, inv.credited_invoice_id)
+    if orig is None:
+        return "?"
+    return f"{orig.number} of {orig.issue_date:%d.%m.%Y}" if orig.issue_date else orig.number or ""
 
 
 # --- state transitions ----------------------------------------------------------------
@@ -349,8 +446,11 @@ _issuer_locks: dict[int, asyncio.Lock] = {}
 
 async def approve(
     session: AsyncSession, settings: Settings, b: InvoiceBundle, approver_tg: int
-) -> bytes:
+) -> bytes | None:
     """Number, freeze and render a draft, then commit. Rolls back on any failure.
+
+    Above MAX_INVOICE_AMOUNT the first approval is only recorded (returns None) and a second,
+    different approver completes it.
 
     Approvals for one issuer run one at a time in-process (so a double click or two approvers
     can't race), and the DB-level atomic increment still guards across processes.
@@ -368,7 +468,7 @@ async def approve(
 
 async def _approve(
     session: AsyncSession, settings: Settings, b: InvoiceBundle, approver_tg: int
-) -> bytes:
+) -> bytes | None:
     inv = b.invoice
     await session.refresh(inv, ["status"])  # another click may have approved it meanwhile
     if inv.status != InvoiceStatus.DRAFT:
@@ -376,7 +476,22 @@ async def _approve(
     incomplete = check_complete(b)
     if incomplete:
         raise InvoiceError(f"Cannot approve yet. Missing: {incomplete}")
-    _check_limit(inv, settings)
+    if needs_two_approvals(inv, settings):
+        await session.refresh(inv, ["first_approved_by"])
+        if inv.first_approved_by is None:
+            inv.first_approved_by, inv.first_approved_at = approver_tg, datetime.now(UTC)
+            audit(
+                session,
+                f"tg:{approver_tg}",
+                "invoice.first_approval",
+                f"invoice:{inv.id}",
+                {"gross": str(inv.amount_gross), "currency": inv.currency},
+            )
+            return None
+        if inv.first_approved_by == approver_tg:
+            raise InvoiceError(
+                "You already gave the first approval. A different approver must give the second."
+            )
     # Atomic increment: concurrent approvals for the same issuer can never share a number.
     n = await session.scalar(
         update(Company)
@@ -392,6 +507,8 @@ async def _approve(
     inv.issue_date = today
     bank = next((a for a in b.issuer.bank_accounts if a.id == inv.bank_account_id), None)
     inv.snapshot = snapshot_for(b.issuer, b.client, bank, await _template(session, inv))
+    if inv.kind == CREDIT_NOTE:
+        await _credit_original(session, inv, approver_tg)
     inv.status = InvoiceStatus.APPROVED
     inv.approved_by = approver_tg
     inv.approved_at = datetime.now(UTC)

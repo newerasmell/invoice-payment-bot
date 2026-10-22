@@ -286,3 +286,73 @@ async def test_public_link(harness: BotHarness, db, settings) -> None:
         assert c.get("/i/short").status_code == 404
         health = c.get("/health").json()
         assert health["pdf"].startswith("weasyprint") and health["llm"] is False
+
+
+async def test_edit_then_approve_does_not_get_stuck(harness: BotHarness, db) -> None:
+    """Regression (production 2026-10-22): Edit, then Approve on the same draft left the chat in
+    edit mode, so every later message or file answered "Only drafts can be edited"."""
+    cid = await _client(db)
+    harness.parser.queue.append(draft(client_id=cid))
+    inv_id = int(buttons(docs(await harness.send_raw("invoice"))[0])[0].rsplit(":", 1)[1])
+    await harness.click(Inv(action="ed", id=inv_id).pack())
+    await harness.click(Inv(action="ap", id=inv_id).pack())
+    calls = await harness.send_raw("", document=("Invoice-3.pdf", "application/pdf", b"%PDF-1.4"))
+    texts = [c.text for c in calls if isinstance(c, SendMessage)]
+    assert "What should I do with this document?" in texts
+    assert not any("Only drafts" in t for t in texts)
+
+
+async def test_stale_edit_state_recovers(harness: BotHarness, db) -> None:
+    """Even if the draft is approved elsewhere (another approver), the next message leaves edit
+    mode and is handled as a new request; /stop also leaves it."""
+    cid = await _client(db)
+    harness.parser.queue.append(draft(client_id=cid))
+    inv_id = int(buttons(docs(await harness.send_raw("invoice"))[0])[0].rsplit(":", 1)[1])
+    await harness.click(Inv(action="ed", id=inv_id).pack())
+    async with db.session() as s:
+        (await s.get(Invoice, inv_id)).status = InvoiceStatus.CANCELLED
+        await s.commit()
+    calls = await harness.send_raw("", document=("Invoice-3.pdf", "application/pdf", b"%PDF-1.4"))
+    texts = [c.text for c in calls if isinstance(c, SendMessage)]
+    assert any("no longer editable" in t for t in texts)
+    assert "What should I do with this document?" in texts
+
+    await harness.click(Inv(action="ed", id=inv_id + 0).pack())  # cancelled: refused, no state
+    assert (await harness.send("/stop"))[-1] == "Cancelled."
+
+
+async def test_credit_note_flow(harness: BotHarness, db) -> None:
+    cid = await _client(db)
+    harness.parser.queue.append(draft(client_id=cid))
+    inv_id = int(buttons(docs(await harness.send_raw("invoice"))[0])[0].rsplit(":", 1)[1])
+    await harness.click(Inv(action="ap", id=inv_id).pack())
+    async with db.session() as s:
+        number = (await s.get(Invoice, inv_id)).number
+
+    assert "Usage" in (await harness.send("/credit"))[-1]
+    assert "No issued invoice" in (await harness.send("/credit 9999999999"))[-1]
+    calls = await harness.send_raw(f"/credit {number} wrong client")
+    [preview] = docs(calls)
+    assert f"Credit note</b> to invoice {number}" in preview.caption
+    assert "Draft credit note" in preview.caption and "-1,440.00 EUR" in preview.caption
+    note_id = int(buttons(preview)[0].rsplit(":", 1)[1])
+    assert "already has credit note" in (await harness.send(f"/credit {number}"))[-1]
+
+    calls = await harness.click(Inv(action="ed", id=note_id).pack())
+    assert any(isinstance(c, AnswerCallbackQuery) and "mirrors" in (c.text or "") for c in calls)
+
+    calls = await harness.click(Inv(action="ap", id=note_id).pack())
+    [issued] = docs(calls)
+    assert "Credit note 0000000002</b> approved" in issued.caption
+    assert issued.document.filename == "credit-note-0000000002.pdf"
+    async with db.session() as s:
+        note = await s.get(Invoice, note_id)
+        orig = await s.get(Invoice, inv_id)
+        assert (note.number, note.amount_gross, note.status) == (
+            "0000000002",
+            Decimal("-1440.00"),
+            InvoiceStatus.APPROVED,
+        )
+        assert orig.status == InvoiceStatus.CANCELLED and note.notes == "wrong client"
+    listing = await harness.send("/invoices")
+    assert "credit note 0000000002" in listing[-1]

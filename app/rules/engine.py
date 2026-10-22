@@ -7,6 +7,7 @@ DRAFT invoice; a human approves it in Telegram like any other draft.
 import logging
 import re
 from dataclasses import dataclass
+from datetime import UTC, datetime
 from decimal import ROUND_HALF_UP, Decimal
 
 from sqlalchemy import select
@@ -180,3 +181,176 @@ async def run_receipt_rules(
         )
         drafts.append(RuleDraft(rule.id, inv.id, bt.amount, percent, amount))
     return drafts
+
+
+# --- Flow E: PAYOUT_ON_RECEIPT -----------------------------------------------------------
+
+PAYOUT_MODES = {
+    "percent": "% of the payment",
+    "fixed": "fixed amount",
+    "remainder": "payment minus an amount kept",
+}
+
+
+@dataclass
+class RuleInstruction:
+    rule_id: int
+    instruction_id: int
+    received: Decimal
+    amount: Decimal
+
+
+def payout_amount(received: Decimal, mode: str, value: Decimal) -> Decimal:
+    """percent: value% of the payment; fixed: value (never more than received);
+    remainder: the payment minus value (the amount the receiving company keeps)."""
+    if mode == "percent":
+        out = received * value / 100
+    elif mode == "fixed":
+        out = min(value, received)
+    elif mode == "remainder":
+        out = received - value
+    else:
+        raise ValueError(f"unknown payout mode {mode!r}")
+    return out.quantize(CENT, rounding=ROUND_HALF_UP)
+
+
+def render_reference(
+    template: str,
+    *,
+    payer: str | None,
+    received: Decimal,
+    currency: str,
+    transfer_ref: str | None,
+    booked: str,
+) -> str:
+    values = {
+        "payer": payer or "",
+        "amount": f"{received:.2f}",
+        "currency": currency,
+        "reference": transfer_ref or "",
+        "date": booked,
+    }
+    out = template or "Payout {date}"
+    for key, val in values.items():
+        out = out.replace("{" + key + "}", val)
+    return re.sub(r"\s+", " ", out).strip()[:140]
+
+
+async def run_payout_rules(
+    session: AsyncSession, settings: Settings, bt: BankTransfer
+) -> list[RuleInstruction]:
+    # Imported here: app.payments.sync imports this module and instructions imports sync's peers.
+    from app.payments.instructions import InstructionError, propose_payout
+
+    if (
+        bt.direction != TransferDirection.INCOMING
+        or bt.company_id is None
+        or bt.status != "processed"
+    ):
+        return []
+    rules = (
+        await session.scalars(
+            select(Rule)
+            .where(
+                Rule.type == RuleType.PAYOUT_ON_RECEIPT,
+                Rule.enabled.is_(True),
+                Rule.trigger_company_id == bt.company_id,
+            )
+            .order_by(Rule.id)
+        )
+    ).all()
+    out: list[RuleInstruction] = []
+    for rule in rules:
+        if await session.scalar(
+            select(RuleRun.id).where(RuleRun.rule_id == rule.id, RuleRun.transfer_id == bt.id)
+        ):
+            continue
+        p = rule.params or {}
+        run = RuleRun(rule_id=rule.id, transfer_id=bt.id, status="skipped")
+        session.add(run)
+        src = p.get("from_company_id")
+        if src:
+            payer_company = await _payer_company(session, bt)
+            if payer_company is None or payer_company.id != int(src):
+                run.detail = "payment not from the selected company"
+                continue
+        try:
+            amount = payout_amount(
+                bt.amount, p.get("mode", "percent"), Decimal(str(p.get("value", "0")))
+            )
+            if amount <= 0:
+                raise svc.InvoiceError("computed payout is not positive")
+            payer = await session.scalar(
+                select(Company)
+                .options(selectinload(Company.bank_accounts))
+                .where(Company.id == rule.trigger_company_id)
+            )
+            target = await session.scalar(
+                select(Company)
+                .options(selectinload(Company.bank_accounts))
+                .where(Company.id == rule.target_company_id)
+            )
+            reference = render_reference(
+                p.get("reference_template", ""),
+                payer=bt.payer_name,
+                received=bt.amount,
+                currency=bt.currency,
+                transfer_ref=bt.reference,
+                booked=(bt.booked_at or datetime.now(UTC)).strftime("%d.%m.%Y"),
+            )
+            instr = await propose_payout(
+                session,
+                settings,
+                rule=rule,
+                payer=payer,
+                target=target,
+                amount=amount,
+                currency=bt.currency,
+                reference=reference,
+                iban=p.get("iban"),
+                name=p.get("name"),
+            )
+        except (InstructionError, svc.InvoiceError, ValueError) as e:
+            run.status, run.detail = "failed", str(e)
+            audit(
+                session,
+                "system",
+                "rule.failed",
+                f"rule:{rule.id}",
+                {"transfer": bt.external_id, "error": str(e)},
+            )
+            continue
+        run.status, run.instruction_id = "drafted", instr.id
+        audit(
+            session,
+            "system",
+            "rule.payout_proposed",
+            f"rule:{rule.id}",
+            {
+                "transfer": bt.external_id,
+                "received": str(bt.amount),
+                "instruction": instr.id,
+                "amount": str(amount),
+            },
+        )
+        out.append(RuleInstruction(rule.id, instr.id, bt.amount, amount))
+    return out
+
+
+async def _payer_company(session: AsyncSession, bt: BankTransfer) -> Company | None:
+    payer_acc, payer_name = _norm(bt.payer_account), _norm(bt.payer_name)
+    for cid, iban, ref in (
+        await session.execute(
+            select(
+                CompanyBankAccount.company_id,
+                CompanyBankAccount.iban,
+                CompanyBankAccount.bank_account_ref,
+            )
+        )
+    ).all():
+        if payer_acc and payer_acc in {_norm(iban), _norm(ref)}:
+            return await session.get(Company, cid)
+    for c in (await session.scalars(select(Company))).all():
+        if payer_name and payer_name in {_norm(c.name), _norm(c.legal_name)}:
+            return c
+    return None

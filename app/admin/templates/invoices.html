@@ -11,7 +11,7 @@
     <tbody>
     {% for inv, code, client in rows %}
     <tr>
-      <td class="mono">{{ inv.number or "draft #%d" % inv.id }}</td>
+      <td class="mono">{{ inv.number or "draft #%d" % inv.id }}{% if inv.kind == "credit_note" %} <span class="badge grey">credit note</span>{% endif %}</td>
       <td><span class="badge">{{ code }}</span> → {{ client }}</td>
       <td style="text-align:right;white-space:nowrap">{{ "{:,.2f}".format(inv.amount_gross) }} {{ inv.currency }}</td>
       <td><span class="badge {{ 'ok' if inv.status.value in ('SENT', 'PAID') else ('grey' if inv.status.value == 'CANCELLED' else '') }}">{{ inv.status.value }}</span></td>

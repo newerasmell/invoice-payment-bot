@@ -15,6 +15,8 @@
     <a href="/admin/invoices" class="{{ 'active' if section == 'invoices' }}">Invoices</a>
     <a href="/admin/rules" class="{{ 'active' if section == 'rules' }}">Rules</a>
     <a href="/admin/notes" class="{{ 'active' if section == 'notes' }}">Note presets</a>
+    <a href="/admin/team" class="{{ 'active' if section == 'team' }}">Team</a>
+    <a href="/admin/audit" class="{{ 'active' if section == 'audit' }}">Audit log</a>
     <form method="post" action="/admin/logout">
       <input type="hidden" name="csrf" value="{{ csrf }}">
       <button class="linkbtn" type="submit">Log out</button>

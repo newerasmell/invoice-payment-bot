@@ -223,5 +223,7 @@ def harness(settings: Settings, db: Database, bank: MockBankProvider) -> BotHarn
 @pytest.fixture
 def admin_settings_factory(settings: Settings):  # noqa: ANN201
     """App settings for TestClient-based tests (no Telegram, no background polling)."""
-    s = settings.model_copy(update={"telegram_bot_token": None, "poll_enabled": False})
+    s = settings.model_copy(
+        update={"telegram_bot_token": None, "poll_enabled": False, "reminders_enabled": False}
+    )
     return s, s.database_url

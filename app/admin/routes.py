@@ -2,8 +2,10 @@ import asyncio
 import logging
 import secrets
 from collections.abc import AsyncIterator
+from decimal import Decimal, InvalidOperation
 from pathlib import Path
 from typing import Annotated, Any
+from urllib.parse import urlencode
 
 import httpx
 from fastapi import APIRouter, Depends, HTTPException, Request
@@ -24,6 +26,8 @@ from app.bank.paynetics import PayneticsClient
 from app.companies import counterparty_for_company, default_bank_account
 from app.config import Settings
 from app.db.models import (
+    AllowedUser,
+    AuditLog,
     BankTransfer,
     Company,
     CompanyBankAccount,
@@ -36,12 +40,14 @@ from app.db.models import (
     Rule,
     RuleRun,
     RuleType,
+    UserRole,
 )
 from app.invoices import service as inv_svc
 from app.invoices.options import FONTS, LAYOUTS, TemplateOptions
 from app.invoices.render import render_invoice_html
 from app.invoices.view import sample_invoice
 from app.redact import redact_iban
+from app.rules.engine import PAYOUT_MODES
 
 log = logging.getLogger(__name__)
 ACTOR = "admin:web"
@@ -53,6 +59,7 @@ templates = Jinja2Templates(directory=Path(__file__).parent / "templates")
 templates.env.filters["redact_iban"] = redact_iban
 templates.env.globals["LAYOUTS"] = LAYOUTS
 templates.env.globals["FONTS"] = FONTS
+templates.env.globals["PAYOUT_MODES"] = PAYOUT_MODES
 templates.env.filters["env_code"] = lambda code: (code or "").upper().replace("-", "_")
 
 public = APIRouter(prefix="/admin")
@@ -820,6 +827,188 @@ async def client_update(request: Request, client_id: int, session: DB) -> Respon
     return redirect(f"/admin/clients/{client.id}", "Client saved", request)
 
 
+# --- team (Telegram whitelist) -----------------------------------------------------
+
+
+async def _team_page(request: Request, session: DB, status: int = 200, **ctx: Any) -> HTMLResponse:  # noqa: ANN401
+    users = (await session.scalars(select(AllowedUser).order_by(AllowedUser.id))).all()
+    companies = (await session.scalars(select(Company).order_by(Company.code))).all()
+    settings: Settings = request.app.state.settings
+    ctx = {"edit": None, "values": {}, "errors": {}, **ctx}
+    return render(
+        request,
+        "team.html",
+        status,
+        users=users,
+        companies=companies,
+        bootstrap=set(settings.bootstrap_approver_ids),
+        **ctx,
+    )
+
+
+@router.get("/team")
+async def team_index(request: Request, session: DB) -> Response:
+    return await _team_page(request, session)
+
+
+@router.post("/team")
+async def team_save(request: Request, session: DB) -> Response:
+    form = await posted(request)
+    errors = f.FormErrors()
+    user_id = f.text(form, "id")
+    raw_tg = f.text(form, "telegram_id")
+    tg_id = None
+    try:
+        tg_id = int(raw_tg)
+        if tg_id <= 0:
+            raise ValueError
+    except ValueError:
+        errors["telegram_id"] = "A Telegram user id is a positive number (ask @userinfobot)"
+    role_raw = f.text(form, "role")
+    if role_raw not in {r.value for r in UserRole}:
+        errors["role"] = "Pick a role"
+    known = {c.code for c in (await session.scalars(select(Company))).all()}
+    codes = [c for c in form.getlist("companies") if isinstance(c, str) and c in known]
+    if tg_id is not None and not errors.get("telegram_id"):
+        clash = await session.scalar(
+            select(AllowedUser.id).where(
+                AllowedUser.telegram_id == tg_id,
+                AllowedUser.id != (int(user_id) if user_id else 0),
+            )
+        )
+        if clash:
+            errors["telegram_id"] = "This Telegram user is already on the team"
+    if errors:
+        return await _team_page(
+            request, session, 422, edit=user_id, values=dict(form), errors=errors
+        )
+    if user_id:
+        user = await session.get(AllowedUser, int(user_id))
+        if user is None:
+            raise HTTPException(404)
+        action = "user.updated"
+    else:
+        user = AllowedUser()
+        session.add(user)
+        action = "user.added"
+    user.telegram_id, user.role = tg_id, UserRole(role_raw)
+    user.display_name = f.text(form, "display_name") or None
+    user.companies = sorted(codes)
+    await session.flush()
+    audit(
+        session,
+        ACTOR,
+        action,
+        f"tg:{tg_id}",
+        {"role": role_raw, "companies": user.companies or "all", "name": user.display_name},
+    )
+    await session.commit()
+    return redirect("/admin/team", "Team member saved", request)
+
+
+@router.post("/team/{user_id}/delete")
+async def team_delete(request: Request, user_id: int, session: DB) -> Response:
+    await posted(request)
+    user = await session.get(AllowedUser, user_id)
+    if user is None:
+        raise HTTPException(404)
+    await session.delete(user)
+    audit(session, ACTOR, "user.removed", f"tg:{user.telegram_id}", {"role": user.role.value})
+    await session.commit()
+    return redirect("/admin/team", "Removed from the team", request)
+
+
+# --- audit log ----------------------------------------------------------------------
+
+AUDIT_PAGE = 100
+
+
+def _audit_query(params: Any) -> tuple[Any, dict[str, str]]:  # noqa: ANN401
+    """Filters shared by the page and the CSV export."""
+    from datetime import date, datetime, time, timedelta
+
+    q = select(AuditLog)
+    flt = {k: (params.get(k) or "").strip() for k in ("action", "entity", "actor", "from", "to")}
+    if flt["action"]:
+        q = q.where(AuditLog.action.contains(flt["action"]))
+    if flt["entity"]:
+        q = q.where(AuditLog.entity.contains(flt["entity"]))
+    if flt["actor"]:
+        q = q.where(AuditLog.actor.contains(flt["actor"]))
+    for key, op in (("from", "ge"), ("to", "lt")):
+        try:
+            d = date.fromisoformat(flt[key]) if flt[key] else None
+        except ValueError:
+            flt[key] = ""
+            continue
+        if d is not None:
+            bound = datetime.combine(d + timedelta(days=1 if op == "lt" else 0), time.min)
+            q = q.where(AuditLog.ts >= bound if op == "ge" else AuditLog.ts < bound)
+    return q, flt
+
+
+@router.get("/audit")
+async def audit_index(request: Request, session: DB) -> Response:
+    q, flt = _audit_query(request.query_params)
+    try:
+        page = max(1, int(request.query_params.get("page") or 1))
+    except ValueError:
+        page = 1
+    rows = (
+        await session.scalars(
+            q.order_by(AuditLog.id.desc()).offset((page - 1) * AUDIT_PAGE).limit(AUDIT_PAGE + 1)
+        )
+    ).all()
+    actions = (
+        await session.scalars(select(AuditLog.action).distinct().order_by(AuditLog.action))
+    ).all()
+    return render(
+        request,
+        "audit.html",
+        rows=rows[:AUDIT_PAGE],
+        more=len(rows) > AUDIT_PAGE,
+        page=page,
+        flt=flt,
+        actions=actions,
+        query=urlencode({k: v for k, v in flt.items() if v}),
+    )
+
+
+def _csv_cell(v: object) -> str:
+    """Text for a CSV cell; spreadsheet formulas are neutralised (CSV injection)."""
+    s = "" if v is None else str(v)
+    return "'" + s if s[:1] in ("=", "+", "-", "@", "\t", "\r") else s
+
+
+@router.get("/audit.csv")
+async def audit_csv(request: Request, session: DB) -> Response:
+    import csv
+    import io
+    import json
+
+    q, _ = _audit_query(request.query_params)
+    rows = (await session.scalars(q.order_by(AuditLog.id).limit(100_000))).all()
+    buf = io.StringIO()
+    w = csv.writer(buf)
+    w.writerow(["id", "time_utc", "actor", "action", "entity", "payload"])
+    for r in rows:
+        w.writerow(
+            [
+                r.id,
+                r.ts.strftime("%Y-%m-%d %H:%M:%S"),
+                _csv_cell(r.actor),
+                _csv_cell(r.action),
+                _csv_cell(r.entity),
+                _csv_cell(json.dumps(r.payload or {}, ensure_ascii=False, sort_keys=True)),
+            ]
+        )
+    return Response(
+        buf.getvalue().encode("utf-8-sig"),  # BOM: Excel opens UTF-8 correctly
+        media_type="text/csv; charset=utf-8",
+        headers={"Content-Disposition": 'attachment; filename="audit-log.csv"'},
+    )
+
+
 # --- invoices -----------------------------------------------------------------------
 
 
@@ -924,24 +1113,50 @@ async def company_bank_test(
 
 
 def _parse_rule(form: FormData, errors: f.FormErrors) -> dict[str, Any]:
-    def company_id(key: str) -> int | None:
+    def company_id(key: str, required: bool = True) -> int | None:
         raw = f.text(form, key)
         if not raw or not raw.isdigit():
-            errors[key] = "Required"
+            if required:
+                errors[key] = "Required"
             return None
         return int(raw)
 
+    kind = f.text(form, "type") or "invoice"
     data: dict[str, Any] = {
+        "type": RuleType.PAYOUT_ON_RECEIPT if kind == "payout" else RuleType.INVOICE_ON_RECEIPT,
         "trigger_company_id": company_id("trigger_company_id"),
-        "target_company_id": company_id("target_company_id"),
-        "percent": f.percent(form, "percent", errors),
-        "service_description": f.text(form, "service_description"),
-        "payment_terms_days": f.integer(form, "payment_terms_days", errors),
-        "include_internal": f.checkbox(form, "include_internal"),
         "enabled": f.checkbox(form, "enabled"),
     }
-    if not data["service_description"]:
-        errors["service_description"] = "Required: printed as the invoice line"
+    if kind == "payout":
+        data["mode"] = f.text(form, "mode") or "percent"
+        if data["mode"] not in PAYOUT_MODES:
+            errors["mode"] = "Choose how the payout is computed"
+        raw = (f.text(form, "value") or "").replace(",", ".")
+        try:
+            data["value"] = Decimal(raw)
+            if data["value"] < 0 or (data["mode"] == "percent" and data["value"] > 100):
+                raise InvalidOperation
+        except InvalidOperation:
+            errors["value"] = "A number (0-100 for a percentage)"
+        data["target_company_id"] = company_id("target_company_id", required=False)
+        data["iban"] = f.text(form, "iban")
+        data["name"] = f.text(form, "name")
+        if data["iban"]:
+            data["iban"] = f.iban(data["iban"], errors)
+            if not data["name"]:
+                errors["name"] = "Required with an IBAN"
+        elif not data["target_company_id"]:
+            errors["target_company_id"] = "Choose one of our companies or enter an IBAN"
+        data["reference_template"] = f.text(form, "reference_template") or "Payout {date}"
+        data["from_company_id"] = company_id("from_company_id", required=False)
+    else:
+        data["target_company_id"] = company_id("target_company_id")
+        data["percent"] = f.percent(form, "percent", errors)
+        data["service_description"] = f.text(form, "service_description")
+        data["payment_terms_days"] = f.integer(form, "payment_terms_days", errors)
+        data["include_internal"] = f.checkbox(form, "include_internal")
+        if not data["service_description"]:
+            errors["service_description"] = "Required: printed as the invoice line"
     if data["trigger_company_id"] and data["trigger_company_id"] == data["target_company_id"]:
         errors["target_company_id"] = "Must be a different company"
     return data
@@ -949,7 +1164,24 @@ def _parse_rule(form: FormData, errors: f.FormErrors) -> dict[str, Any]:
 
 async def _save_rule(session: AsyncSession, rule: Rule, data: dict[str, Any]) -> None:
     trigger = await session.get(Company, data["trigger_company_id"])
-    if trigger is None or await session.get(Company, data["target_company_id"]) is None:
+    if trigger is None:
+        raise HTTPException(400, "Unknown company")
+    rule.type, rule.trigger_company_id = data["type"], trigger.id
+    rule.enabled = data["enabled"]
+    if data["type"] == RuleType.PAYOUT_ON_RECEIPT:
+        # target_company_id is NOT NULL in the schema; with an external IBAN it points at the
+        # paying company itself and is ignored by the engine.
+        rule.target_company_id = data["target_company_id"] or trigger.id
+        rule.params = {
+            "mode": data["mode"],
+            "value": str(data["value"]),
+            "iban": data["iban"] if data["iban"] else None,
+            "name": data["name"] if data["iban"] else None,
+            "reference_template": data["reference_template"],
+            "from_company_id": data["from_company_id"],
+        }
+        return
+    if await session.get(Company, data["target_company_id"]) is None:
         raise HTTPException(400, "Unknown company")
     client = await counterparty_for_company(session, trigger)
     contract_id = (rule.params or {}).get("contract_id")
@@ -964,9 +1196,7 @@ async def _save_rule(session: AsyncSession, rule: Rule, data: dict[str, Any]) ->
     contract.fee_rule, contract.fee_value = FeeRuleType.PERCENT, data["percent"]
     contract.payment_terms_days = data["payment_terms_days"]
     await session.flush()
-    rule.type = RuleType.INVOICE_ON_RECEIPT
-    rule.trigger_company_id, rule.target_company_id = trigger.id, data["target_company_id"]
-    rule.enabled = data["enabled"]
+    rule.target_company_id = data["target_company_id"]
     rule.params = {
         "percent": str(data["percent"]),
         "contract_id": contract.id,
@@ -1019,7 +1249,16 @@ async def rules_index(request: Request, session: DB) -> Response:
 
 @router.get("/rules/new")
 async def rule_new(request: Request, session: DB) -> Response:
-    rule = Rule(enabled=True, params={"percent": "1.5"})
+    kind = request.query_params.get("type")
+    rule = (
+        Rule(
+            enabled=True,
+            type=RuleType.PAYOUT_ON_RECEIPT,
+            params={"mode": "percent", "value": "100", "reference_template": "Payout {date}"},
+        )
+        if kind == "payout"
+        else Rule(enabled=True, type=RuleType.INVOICE_ON_RECEIPT, params={"percent": "1.5"})
+    )
     return await _rule_form(request, session, rule)
 
 
@@ -1028,7 +1267,7 @@ async def rule_create(request: Request, session: DB) -> Response:
     form = await posted(request)
     errors = f.FormErrors()
     data = _parse_rule(form, errors)
-    rule = Rule(params={})
+    rule = Rule(params={}, type=data["type"])
     if errors:
         return await _rule_form(request, session, rule, 422, dict(form), errors)
     await _save_rule(session, rule, data)

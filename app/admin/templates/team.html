@@ -1,0 +1,56 @@
+{% extends "base.html" %}
+{% from "_macros.html" import csrf_input, post_button %}
+{% set section = "team" %}
+{% block title %}Team{% endblock %}
+{% block content %}
+<h1>Team</h1>
+<p class="sub">Who may use the Telegram bot. Everyone else is ignored. <b>Approvers</b> approve invoices and payments; above the amount limits a second, different approver is needed. <b>Operators</b> prepare drafts and documents. Restrict a person to some companies, or leave all unticked for all companies.</p>
+{% if errors %}<div class="alert">{% for e in errors.values() %}{{ e }}{% if not loop.last %}<br>{% endif %}{% endfor %}</div>{% endif %}
+<div class="panel">
+  {% if users %}
+  <table class="list">
+    <thead><tr><th>Name</th><th>Telegram id</th><th>Role</th><th>Companies</th><th style="width:150px"></th></tr></thead>
+    <tbody>
+    {% for u in users %}
+    <tr>
+      <td><b>{{ u.display_name or "—" }}</b>{% if u.telegram_id in bootstrap %} <span class="badge grey" title="From BOOTSTRAP_APPROVER_IDS: re-added as approver on restart if removed">bootstrap</span>{% endif %}</td>
+      <td class="mono">{{ u.telegram_id }}</td>
+      <td><span class="badge {{ 'ok' if u.role.value == 'approver' }}">{{ u.role.value }}</span></td>
+      <td>{% if u.companies %}{% for c in u.companies %}<span class="badge">{{ c }}</span> {% endfor %}{% else %}<span class="muted">All</span>{% endif %}</td>
+      <td class="actions" style="justify-content:flex-end">
+        <a class="btn secondary small" href="#edit-{{ u.id }}" onclick="document.getElementById('edit-{{ u.id }}').hidden=false;return false">Edit</a>
+        {{ post_button("/admin/team/%d/delete" % u.id, "Remove", csrf, "btn danger small", "Remove this person from the bot?") }}
+      </td>
+    </tr>
+    <tr id="edit-{{ u.id }}" {{ 'hidden' if edit != u.id | string }}><td colspan="5">{{ user_form(u, u.id) }}</td></tr>
+    {% endfor %}
+    </tbody>
+  </table>
+  {% else %}<div class="empty">Nobody yet. Add yourself below (your id: message @userinfobot in Telegram).</div>{% endif %}
+</div>
+<div class="panel">
+  <h2>Add a person</h2>
+  {{ user_form(none, "") }}
+</div>
+{% endblock %}
+
+{% macro user_form(u, uid) %}
+{% set use_values = edit == uid | string and values %}
+{% set role = values.role if use_values else (u.role.value if u else 'operator') %}
+<form method="post" action="/admin/team" class="form-grid">
+  {{ csrf_input(csrf) }}
+  <input type="hidden" name="id" value="{{ uid }}">
+  <div class="field"><label>Name</label><input type="text" name="display_name" value="{{ values.display_name if use_values else (u.display_name or '' if u else '') }}" placeholder="Shown to the other approver"></div>
+  <div class="field"><label>Telegram user id</label><input type="text" name="telegram_id" inputmode="numeric" value="{{ values.telegram_id if use_values else (u.telegram_id if u else '') }}"></div>
+  <div class="field"><label>Role</label>
+    <select name="role">
+      <option value="operator" {{ 'selected' if role == 'operator' }}>Operator</option>
+      <option value="approver" {{ 'selected' if role == 'approver' }}>Approver</option>
+    </select>
+  </div>
+  <div class="field"><label>Companies</label>
+    <div class="actions">{% for c in companies %}<label class="check"><input type="checkbox" name="companies" value="{{ c.code }}" {{ 'checked' if u and c.code in u.companies }}> {{ c.code }}</label>{% endfor %}</div>
+  </div>
+  <div class="full"><button class="btn small" type="submit">{{ "Save" if u else "Add" }}</button></div>
+</form>
+{% endmacro %}

@@ -32,7 +32,7 @@ from app.db.models import (
 from app.db.session import Database
 from app.payments.instructions import match_outgoing
 from app.payments.matching import Candidate, MatchResult, match_transfer
-from app.rules.engine import RuleDraft, run_receipt_rules
+from app.rules.engine import RuleDraft, run_payout_rules, run_receipt_rules
 
 log = logging.getLogger(__name__)
 _sync_lock = asyncio.Lock()
@@ -107,7 +107,11 @@ async def open_candidates(session: AsyncSession, company_id: int) -> list[Candid
         await session.execute(
             select(Invoice, Counterparty)
             .join(Counterparty, Counterparty.id == Invoice.counterparty_id)
-            .where(Invoice.issuer_id == company_id, Invoice.status.in_(_OPEN))
+            .where(
+                Invoice.issuer_id == company_id,
+                Invoice.status.in_(_OPEN),
+                Invoice.kind == "invoice",  # credit notes are never paid in
+            )
             .order_by(Invoice.id)
         )
     ).all()
@@ -157,6 +161,12 @@ async def process_transfer(
     if settings is not None:
         for d in await run_receipt_rules(session, settings, bt):
             events.append(PaymentEvent("rule_draft", bt.id, bt.company_id, rule_draft=d))
+        for ri in await run_payout_rules(session, settings, bt):
+            events.append(
+                PaymentEvent(
+                    "rule_instruction", bt.id, bt.company_id, instruction_id=ri.instruction_id
+                )
+            )
     return events
 
 

@@ -12,28 +12,68 @@
 {% block content %}
 <div class="crumbs"><a href="/admin/rules">Rules</a> /</div>
 <h1>{{ "New rule" if is_new else "Rule #%d" % rule.id }}</h1>
+{% if rule.type and rule.type.value == "PAYOUT_ON_RECEIPT" %}
+<p class="sub">When the company receives a payment, a payment instruction to pass money on is prepared. It still needs approval in Telegram and you execute it in the bank.</p>
+{% else %}
 <p class="sub">When the first company receives a payment of Y, the second company drafts an invoice to it for Y minus the percentage. The draft goes to Telegram for approval.</p>
+{% endif %}
 {% if errors %}<div class="alert">Please fix the highlighted fields.</div>{% endif %}
+{% set payout = rule.type and rule.type.value == "PAYOUT_ON_RECEIPT" %}
+{% set p = rule.params or {} %}
 <form method="post" class="panel" action="{{ '/admin/rules/new' if is_new else '/admin/rules/%d' % rule.id }}">
   {{ csrf_input(csrf) }}
+  <input type="hidden" name="type" value="{{ 'payout' if payout else 'invoice' }}">
   <div class="form-grid">
     <div class="field {{ 'has-error' if errors.get('trigger_company_id') }}">
       <label for="f-trigger_company_id">When this company receives a payment</label>
       {{ sel("trigger_company_id", rule.trigger_company_id) }}
       {% if errors.get('trigger_company_id') %}<div class="error">{{ errors.trigger_company_id }}</div>{% endif %}
     </div>
+    {% if payout %}
+    <div class="field {{ 'has-error' if errors.get('target_company_id') }}">
+      <label for="f-target_company_id">Pay out to our company</label>
+      <select id="f-target_company_id" name="target_company_id">
+        <option value="">— or use the IBAN below —</option>
+        {% set cur = values.get("target_company_id") or ((rule.target_company_id|string) if rule.target_company_id and not p.get("iban") else "") %}
+        {% for c in companies %}<option value="{{ c.id }}" {{ 'selected' if cur == c.id|string }}>{{ c.code }} - {{ c.legal_name or c.name }}</option>{% endfor %}
+      </select>
+      {% if errors.get('target_company_id') %}<div class="error">{{ errors.target_company_id }}</div>{% else %}<div class="hint">Its default bank account in the payment currency is used.</div>{% endif %}
+    </div>
+    {{ field("iban", "…or an external IBAN", values.get("iban") or p.get("iban") or "", errors, attrs='class="mono"') }}
+    {{ field("name", "Beneficiary name (for the IBAN)", values.get("name") or p.get("name") or "", errors) }}
+    <div class="field {{ 'has-error' if errors.get('mode') }}">
+      <label for="f-mode">Amount</label>
+      <select id="f-mode" name="mode">
+        {% for key, label in PAYOUT_MODES.items() %}<option value="{{ key }}" {{ 'selected' if (values.get('mode') or p.get('mode', 'percent')) == key }}>{{ label }}</option>{% endfor %}
+      </select>
+    </div>
+    {{ field("value", "Value", values.get("value") or p.get("value", "100"), errors, hint="percent: share of the payment (100 = all of it) · fixed: amount to pay · remainder: amount the receiving company keeps") }}
+    {{ field("reference_template", "Payment reference", values.get("reference_template") or p.get("reference_template", "Payout {date}"), errors, cls="full", hint="Placeholders: {date}, {payer}, {amount}, {currency}, {reference}") }}
+    <div class="field full">
+      <label for="f-from_company_id">Only for payments from</label>
+      <select id="f-from_company_id" name="from_company_id">
+        <option value="">Any payer</option>
+        {% set fr = values.get("from_company_id") or ((p.get("from_company_id")|string) if p.get("from_company_id") else "") %}
+        {% for c in companies %}<option value="{{ c.id }}" {{ 'selected' if fr == c.id|string }}>{{ c.code }} - {{ c.legal_name or c.name }}</option>{% endfor %}
+      </select>
+      <div class="hint">E.g. pay G only when Z is paid by X.</div>
+    </div>
+    {% else %}
     <div class="field {{ 'has-error' if errors.get('target_company_id') }}">
       <label for="f-target_company_id">this company invoices it</label>
       {{ sel("target_company_id", rule.target_company_id) }}
       {% if errors.get('target_company_id') %}<div class="error">{{ errors.target_company_id }}</div>{% endif %}
     </div>
-    {{ field("percent", "Deduct (%)", values.get("percent") or (rule.params or {}).get("percent", "1.5"), errors, hint="Invoice total = payment − this percentage, rounded half-up to cents") }}
+    {{ field("percent", "Deduct (%)", values.get("percent") or p.get("percent", "1.5"), errors, hint="Invoice total = payment − this percentage, rounded half-up to cents") }}
     {{ field("payment_terms_days", "Payment terms (days)", values.get("payment_terms_days") or (contract.payment_terms_days if contract else 14), errors, type="number", attrs='min="0"') }}
     {{ field("service_description", "Invoice line (service description)", values.get("service_description") or (contract.service_description if contract else ""), errors, type="textarea", cls="full", hint="Printed as the line on the invoice, e.g. “Marketing services under agreement 12/2026”") }}
     <div class="field full">
-      {% set inc = (values.get('include_internal') == 'on') if values else (rule.params or {}).get('include_internal') %}
+      {% set inc = (values.get('include_internal') == 'on') if values else p.get('include_internal') %}
       <label class="check"><input type="checkbox" name="include_internal" {{ 'checked' if inc }}> Also for payments from our own companies</label>
       <div class="hint">Off by default, so money moving X → Z → G never triggers new invoices in a loop.</div>
+    </div>
+    {% endif %}
+    <div class="field full">
       {% set en = (values.get('enabled') == 'on') if values else rule.enabled %}
       <label class="check"><input type="checkbox" name="enabled" {{ 'checked' if en }}> Enabled</label>
     </div>
@@ -53,7 +93,7 @@
     <tr>
       <td class="small muted">{{ run.created_at.strftime("%d.%m.%Y %H:%M") }}</td>
       <td>{{ "{:,.2f}".format(bt.amount) }} {{ bt.currency }} from {{ bt.payer_name or "?" }}</td>
-      <td>{% if run.status == "drafted" %}<span class="badge ok">drafted</span> {% if inv %}<a href="/admin/invoices/{{ inv.id }}/pdf" target="_blank">{{ inv.number or "draft #%d" % inv.id }}</a> · {{ "{:,.2f}".format(inv.amount_gross) }}{% endif %}{% else %}<span class="badge grey">{{ run.status }}</span> <span class="small muted">{{ run.detail or "" }}</span>{% endif %}</td>
+      <td>{% if run.status == "drafted" and run.instruction_id %}<span class="badge ok">payment proposed</span> instruction #{{ run.instruction_id }}{% elif run.status == "drafted" %}<span class="badge ok">drafted</span> {% if inv %}<a href="/admin/invoices/{{ inv.id }}/pdf" target="_blank">{{ inv.number or "draft #%d" % inv.id }}</a> · {{ "{:,.2f}".format(inv.amount_gross) }}{% endif %}{% else %}<span class="badge grey">{{ run.status }}</span> <span class="small muted">{{ run.detail or "" }}</span>{% endif %}</td>
     </tr>
     {% endfor %}
     </tbody>

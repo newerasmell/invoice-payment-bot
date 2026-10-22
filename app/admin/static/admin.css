@@ -47,7 +47,7 @@ form.inline { display: inline; }
 .field label { display: block; font-weight: 600; font-size: 13px; margin-bottom: 4px; }
 .field .hint { color: var(--muted); font-size: 12px; margin-top: 3px; }
 .field .error { color: var(--danger); font-size: 12.5px; margin-top: 3px; }
-input[type=text], input[type=password], input[type=number], input[type=email], select, textarea {
+input[type=text], input[type=password], input[type=number], input[type=email], input[type=date], select, textarea {
   width: 100%; border: 1px solid #d0d5dd; border-radius: 6px; padding: 8px 10px; font: inherit; background: #fff; color: var(--text);
 }
 textarea { min-height: 70px; resize: vertical; }
@@ -86,3 +86,8 @@ table.list tr:last-child td { border-bottom: 0; }
   .nav .brand { margin: 0 10px 0 4px; } .nav form { margin: 0; } main { padding: 18px 16px 40px; }
   .form-grid { grid-template-columns: 1fr; }
 }
+.audit-filters { display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); gap: 12px 14px; align-items: end; }
+.audit-filters .actions { grid-column: 1 / -1; }
+.audit-payload { max-width: 520px; word-break: break-word; }
+.audit-payload span { margin-right: 6px; }
+@media (max-width: 900px) { .audit-filters { grid-template-columns: repeat(2, minmax(0, 1fr)); } }

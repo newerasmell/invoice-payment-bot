@@ -30,8 +30,9 @@
       <div class="title">{{ o.title }}</div>
       {% if o.subtitle %}<div class="subtitle">{{ o.subtitle }}</div>{% endif %}
       <table>
-        <tr><th>Invoice No</th><td>{{ inv.number }}</td></tr>
-        <tr><th>Invoice date</th><td>{{ inv.issue_date | date }}</td></tr>
+        <tr><th>{{ inv.doc_label }} No</th><td>{{ inv.number }}</td></tr>
+        <tr><th>{{ inv.doc_label }} date</th><td>{{ inv.issue_date | date }}</td></tr>
+        {% if inv.is_credit %}<tr><th>To invoice</th><td>{{ inv.credit_for }}</td></tr>{% endif %}
       </table>
     </div>
   </td>

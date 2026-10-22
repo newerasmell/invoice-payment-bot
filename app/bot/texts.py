@@ -26,6 +26,8 @@ HELP = (
     "/rules - automatic invoicing rules\n"
     "/companies - company profiles\n"
     "/balance &lt;company&gt; - account balance\n"
+    "/credit &lt;number&gt; [reason] - credit note for an issued invoice\n"
+    "/cancel - stop the current edit or question\n"
     "/help - this message"
 )
 
@@ -109,8 +111,27 @@ EDIT_PROMPT = (
     "What should change? E.g. <i>make it 1500 EUR</i>, <i>add a line Hosting 2 × 50</i>, "
     "<i>VAT 0%</i>, <i>due in 30 days</i>. Send /cancel to stop editing."
 )
+EDIT_STOPPED = "That draft is no longer editable (approved or rejected), so I left edit mode."
 EDIT_FAILED_CLIENT = "I couldn't match that client; the draft keeps {name}."
 ONLY_APPROVERS = "Only approvers can approve invoices."
+NO_SECOND_APPROVER = (
+    "⚠️ No other approver has access to this company. Add one (AllowedUser, role approver) "
+    "so the second approval can be given."
+)
+
+
+def first_approval_done(what: str, amount, currency: str, limit) -> str:  # noqa: ANN001
+    return (
+        f"☑️ First approval recorded for {what} ({fmt_money(amount, currency)}). It is above "
+        f"the limit of {limit:,.2f}, so a <b>second approver</b> must approve it too. "
+        "I've asked the other approvers."
+    )
+
+
+def second_approval_request(what: str, by: str) -> str:
+    return f"✍️ <b>Second approval needed</b> for {what}, already approved by {escape(by)}."
+
+
 NOT_YOUR_COMPANY = "You are not allowed to act for this company."
 PDF_UNAVAILABLE = "(PDF engine unavailable on the server: {error})"
 NOT_NOW = "OK. Use /invoices to send it later."
@@ -120,9 +141,23 @@ BTN_APPROVE, BTN_EDIT, BTN_REJECT = "✅ Approve", "✏️ Edit", "❌ Reject"
 BTN_SEND, BTN_NOT_NOW = "📤 Send to client", "Not now"
 
 
+def doc_label(inv) -> str:  # noqa: ANN001
+    return "Credit note" if getattr(inv, "kind", "invoice") == "credit_note" else "Invoice"
+
+
+CREDIT_USAGE = (
+    "Usage: /credit &lt;invoice number&gt; [reason]\n"
+    "Creates a draft credit note for the full amount of an issued invoice. When approved it "
+    "gets the next number in the issuer's series and the invoice is cancelled (a paid one stays "
+    "paid; refund it in the bank). Check the wording with your accountant."
+)
+CREDIT_NOT_FOUND = "No issued invoice with number <code>{number}</code>."
+CREDIT_HEADER = "🧾 <b>Credit note</b> to invoice {number} of {date}"
+
+
 def draft_caption(inv, issuer, client, warnings: list[str]) -> str:  # noqa: ANN001
     lines = [
-        f"<b>Draft invoice</b> · {escape(issuer.code)} → {escape(client.name)}",
+        f"<b>Draft {doc_label(inv).lower()}</b> · {escape(issuer.code)} → {escape(client.name)}",
     ]
     for li in inv.lines[:8]:
         qty = f"{li.quantity.normalize():f}"
@@ -143,7 +178,7 @@ def draft_caption(inv, issuer, client, warnings: list[str]) -> str:  # noqa: ANN
 
 def approved_caption(inv, issuer, client, link: str | None) -> str:  # noqa: ANN001
     text = (
-        f"✅ <b>Invoice {escape(inv.number)}</b> approved\n"
+        f"✅ <b>{doc_label(inv)} {escape(inv.number)}</b> approved\n"
         f"{escape(issuer.legal_name or issuer.name)} → {escape(client.name)}\n"
         f"<b>{fmt_money(inv.amount_gross, inv.currency)}</b>"
     )
@@ -172,6 +207,8 @@ def invoice_list(items) -> str:  # noqa: ANN001
     rows = ["<b>Recent invoices</b>"]
     for inv, issuer_code, client_name in items:
         num = inv.number or f"draft #{inv.id}"
+        if getattr(inv, "kind", "invoice") == "credit_note":
+            num = f"credit note {num}"
         rows.append(
             f"{escape(num)} · {escape(issuer_code)} → {escape(client_name)} · "
             f"{fmt_money(inv.amount_gross, inv.currency)} · {inv.status.value}"
@@ -263,7 +300,20 @@ def rules_list(rows) -> str:  # noqa: ANN001
     out = ["<b>Rules</b>"]
     for rule, trigger, target, description in rows:
         state = "✅" if rule.enabled else "⏸"
-        pct = (rule.params or {}).get("percent", "1.5")
+        p = rule.params or {}
+        if rule.type.value == "PAYOUT_ON_RECEIPT":
+            dest = escape(p.get("name") or "") if p.get("iban") else f"<b>{escape(target)}</b>"
+            how = {
+                "percent": f"{p.get('value')}% of it",
+                "fixed": f"{p.get('value')}",
+                "remainder": f"all but {p.get('value')}",
+            }.get(p.get("mode"), "?")
+            out.append(
+                f"{state} When <b>{escape(trigger)}</b> receives a payment → pay {dest} "
+                f"{escape(how)} (payment instruction)"
+            )
+            continue
+        pct = p.get("percent", "1.5")
         out.append(
             f"{state} When <b>{escape(trigger)}</b> receives a payment → <b>{escape(target)}</b> "
             f"invoices {escape(trigger)} for the amount −{escape(str(pct))}%"
@@ -429,3 +479,21 @@ def instructions_list(rows) -> str:  # noqa: ANN001
             f"{fmt_money(i.amount, i.currency)} · {escape(i.status.value)}{due}"
         )
     return "\n".join(out)
+
+
+def reminder_invoice(inv, issuer, client, days: int) -> str:  # noqa: ANN001
+    when = "1 day" if days == 1 else f"{days} days"
+    return (
+        f"⏰ <b>Invoice {escape(inv.number or '')}</b> ({escape(issuer.code)} → "
+        f"{escape(client.name)}, {fmt_money(inv.amount_gross, inv.currency)}) is "
+        f"<b>overdue by {when}</b> (due {inv.due_date:%d.%m.%Y}) and no payment has been matched."
+    )
+
+
+def reminder_instruction(i, payer, hours: int) -> str:  # noqa: ANN001
+    return (
+        f"⏰ <b>Payment instruction #{i.id}</b> ({escape(payer.code)} → {escape(i.to_name)}, "
+        f"{fmt_money(i.amount, i.currency)}) was approved {hours} h ago, but the bank doesn't "
+        f"show the transfer yet. Make it in the Paynetics panel of {escape(payer.code)}, "
+        "or cancel the instruction if it is no longer needed."
+    )

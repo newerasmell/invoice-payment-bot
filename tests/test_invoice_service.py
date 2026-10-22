@@ -6,7 +6,7 @@ import pytest
 from sqlalchemy import select
 from sqlalchemy.orm import selectinload
 
-from app.db.models import AuditLog, Company, Counterparty, InvoiceStatus
+from app.db.models import AuditLog, Company, Counterparty, Invoice, InvoiceStatus
 from app.invoices import service as svc
 from tests.conftest import CLIENT_DETAILS
 
@@ -76,15 +76,28 @@ async def test_amounts_including_vat(db, settings) -> None:
     assert inv.amount_net == Decimal("1000.00") and inv.amount_gross == Decimal("1200.00")
 
 
-async def test_limit(db, settings) -> None:
+async def test_above_limit_needs_two_different_approvers(db, settings) -> None:
     issuer, client = await _setup(db)
-    with pytest.raises(svc.InvoiceError, match="above the limit"):
-        await _draft(
-            db,
-            settings,
-            issuer,
-            client,
-            lines=[svc.LineInput("Big", Decimal("1"), Decimal("60000"))],
+    inv_id = await _draft(
+        db, settings, issuer, client, lines=[svc.LineInput("Big", Decimal("1"), Decimal("60000"))]
+    )
+    async with db.session() as s:
+        assert await svc.approve(s, settings, await svc.load_bundle(s, inv_id), 1001) is None
+    async with db.session() as s:
+        inv = await s.get(Invoice, inv_id)
+        assert inv.status == InvoiceStatus.DRAFT and inv.first_approved_by == 1001
+        assert inv.number is None  # no number is used up by the first approval
+        with pytest.raises(svc.InvoiceError, match="different approver"):
+            await svc.approve(s, settings, await svc.load_bundle(s, inv_id), 1001)
+    async with db.session() as s:
+        pdf = await svc.approve(s, settings, await svc.load_bundle(s, inv_id), 1002)
+        assert pdf and pdf.startswith(b"%PDF")
+    async with db.session() as s:
+        inv = await s.get(Invoice, inv_id)
+        assert (inv.status, inv.number, inv.approved_by) == (
+            InvoiceStatus.APPROVED,
+            "0000000001",
+            1002,
         )
 
 

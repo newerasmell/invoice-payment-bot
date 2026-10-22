@@ -13,7 +13,7 @@ from app.db.models import (
     PaymentInstruction,
 )
 from app.llm.parser import DocumentRead, InvoiceDraft, PartyDetails
-from tests.conftest import BotHarness
+from tests.conftest import APPROVER_ID, BotHarness
 
 PDF = ("invoice.pdf", "application/pdf", b"%PDF-1.4 test")
 SUPPLIER = PartyDetails(
@@ -182,7 +182,6 @@ async def test_pay_validation_and_duplicates(harness: BotHarness, db) -> None:
     for bad, err in [
         (doc(issuer_iban="BG80BNBG96611020345679"), "checksum"),
         (doc(total=""), "amount due"),
-        (doc(total="900000"), "above the payment limit"),
     ]:
         await _menu(harness)
         harness.parser.doc_queue.append(bad)
@@ -195,6 +194,38 @@ async def test_pay_validation_and_duplicates(harness: BotHarness, db) -> None:
     assert (
         "already has payment instruction" in msgs(await harness.click(Doc(action="pay").pack()))[-1]
     )
+
+
+async def test_large_payment_needs_second_approver(harness: BotHarness, db) -> None:
+    from app.db.models import AllowedUser, UserRole
+
+    async with db.session() as s:
+        s.add(AllowedUser(telegram_id=2003, role=UserRole.APPROVER, display_name="Maria"))
+        s.add(AllowedUser(telegram_id=2004, role=UserRole.APPROVER, companies=["Z"]))
+        await s.commit()
+    await _menu(harness)
+    harness.parser.doc_queue.append(doc(total="90000"))
+    await harness.click(Doc(action="pay").pack())
+    async with db.session() as s:
+        iid = await s.scalar(select(PaymentInstruction.id))
+    calls = await harness.click(Ins(action="ap", id=iid).pack())
+    assert any("second approver" in t for t in msgs(calls))
+    asks = [c for c in calls if isinstance(c, SendMessage) and "Second approval needed" in c.text]
+    assert [c.chat_id for c in asks] == [2003]  # not the first approver, not a Z-only user
+    async with db.session() as s:
+        got = await s.get(PaymentInstruction, iid)
+        assert got.status == InstructionStatus.PROPOSED and got.first_approved_by == APPROVER_ID
+    calls = await harness.click(Ins(action="ap", id=iid).pack())
+    assert any(
+        isinstance(c, AnswerCallbackQuery) and "different approver" in (c.text or "") for c in calls
+    )
+    async with db.session() as s:
+        assert (await s.get(PaymentInstruction, iid)).status == InstructionStatus.PROPOSED
+    calls = await harness.click(Ins(action="ap", id=iid).pack(), user_id=2003)
+    assert any("Paynetics panel of X" in t for t in msgs(calls))
+    async with db.session() as s:
+        got = await s.get(PaymentInstruction, iid)
+        assert got.status == InstructionStatus.AWAITING_BANK and got.approved_by == 2003
 
 
 async def test_payer_picker_and_operator_cannot_approve(harness: BotHarness, db) -> None:

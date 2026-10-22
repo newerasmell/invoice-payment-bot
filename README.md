@@ -37,11 +37,28 @@ from code: transfers are executed by a human in the bank panel. See `CLAUDE.md` 
   **Invoice to pay**; a caption like "pay this" picks the action directly.
 - **M5 part 1 (done): payment instructions.** "Invoice to pay" reads supplier, IBAN (checksum),
   amount, reference and due date, resolves which of our companies pays, and shows a card with
-  **Approve payment / Cancel** (limit `MAX_PAYMENT_INSTRUCTION_AMOUNT`, no duplicates per
-  supplier invoice). After approval you pay in the Paynetics panel; the outgoing transfer (same
+  **Approve payment / Cancel** (no duplicates per supplier invoice). After approval you pay in the Paynetics panel; the outgoing transfer (same
   payer, amount, currency + IBAN or reference) marks it **EXECUTED** and notifies. Invoices
   from our own companies are cross-checked with what we issued. `/instructions` lists open ones.
-- Next: Flow E (payout rule Z → G), IMAP inbox, reminders, public invoice-request form, M6.
+- **M5 part 2 (done): payout rules (Flow E).** Admin → Rules → **+ Payout rule**: "when Z
+  receives a payment (optionally only from X), pay G a % / a fixed amount / all but an amount
+  kept". The bot proposes the payment instruction (to G's default account in the currency, or
+  a fixed external IBAN) with a reference from a template; approval and execution are the same
+  as above. The full X → Z → G cycle runs end to end in mock mode.
+- **M6 (done): hardening.**
+  - Above `MAX_INVOICE_AMOUNT` / `MAX_PAYMENT_INSTRUCTION_AMOUNT` nothing is blocked, but
+    approval needs **two different approvers**: the first approval is recorded (no invoice
+    number is used) and the other approvers of that company get the item with its buttons.
+  - Reminders in Telegram: invoices past their due date that aren't paid, and approved
+    payment instructions the bank hasn't shown after `INSTRUCTION_TIMEOUT_HOURS`; repeated
+    at most every `REMINDER_REPEAT_HOURS`.
+  - Admin → **Team**: who may use the bot (Telegram id, name, approver/operator, companies).
+  - Admin → **Audit log**: filter by action/entity/actor/date, **Export CSV**.
+- **Credit notes (done):** `/credit <invoice number> [reason]` drafts a credit note for the full
+  amount (negative lines, same parties as the invoice) with Approve / Reject. Approval gives it
+  the next number in the issuer's series and cancels the invoice (a PAID one stays PAID; the
+  refund is made in the bank). Delivery works like an invoice. *Confirm the numbering and
+  wording with your accountant.*
 
 ### Connecting Paynetics
 

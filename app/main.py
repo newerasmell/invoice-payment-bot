@@ -21,6 +21,7 @@ from app.db.migrate import upgrade_to_head
 from app.db.session import Database
 from app.invoices.pdf import pdf_engine_status
 from app.payments.poller import poll_forever
+from app.reminders import remind_forever
 
 log = logging.getLogger("app")
 
@@ -65,13 +66,17 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         poller: asyncio.Task[None] | None = None
         if settings.poll_enabled:
             poller = asyncio.create_task(poll_forever(settings, db, bank, bot))
+        reminders: asyncio.Task[None] | None = None
+        if settings.reminders_enabled:
+            reminders = asyncio.create_task(remind_forever(settings, db, bot))
         try:
             yield
         finally:
-            if poller:
-                poller.cancel()
-                with suppress(asyncio.CancelledError):
-                    await poller
+            for task in (poller, reminders):
+                if task:
+                    task.cancel()
+                    with suppress(asyncio.CancelledError):
+                        await task
             if hasattr(bank, "aclose"):
                 await bank.aclose()
             if polling:

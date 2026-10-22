@@ -508,3 +508,95 @@ def test_rules_admin(client: TestClient, sync_db: Session) -> None:
     assert sync_db.get(Contract, rule.params["contract_id"]).service_description == "Media buying"
     page = client.get("/admin/rules").text
     assert "Y − 2.00%" in page and "Media buying" in page
+
+
+def test_audit_log_page_and_csv(client: TestClient, sync_db: Session) -> None:
+    for url in ("/admin/audit", "/admin/audit.csv"):
+        r = client.get(url)
+        assert r.status_code == 303 and r.headers["location"] == "/admin/login", url
+    login(client)
+    from datetime import UTC, datetime
+
+    sync_db.add_all(
+        [
+            AuditLog(
+                actor="tg:1001",
+                action="invoice.approved",
+                entity="invoice:7",
+                payload={"number": "0000000007"},
+                ts=datetime(2026, 10, 20, 9, tzinfo=UTC),
+            ),
+            AuditLog(
+                actor="system",
+                action="instruction.executed",
+                entity="instruction:3",
+                payload={"to": '=HYPERLINK("x")'},
+                ts=datetime(2026, 10, 21, 9, tzinfo=UTC),
+            ),
+        ]
+    )
+    sync_db.commit()
+    page = client.get("/admin/audit").text
+    assert "invoice.approved" in page and "instruction.executed" in page
+    page = client.get("/admin/audit?action=invoice.&from=2026-10-20&to=2026-10-20").text
+    assert "invoice:7" in page and "instruction:3" not in page
+    assert client.get("/admin/audit?from=nonsense").status_code == 200
+
+    r = client.get("/admin/audit.csv?entity=instruction")
+    assert r.status_code == 200 and r.headers["content-type"].startswith("text/csv")
+    lines = r.content.decode("utf-8-sig").splitlines()
+    assert lines[0] == "id,time_utc,actor,action,entity,payload"
+    assert len(lines) == 2 and "2026-10-21 09:00:00" in lines[1]
+    assert "instruction.executed" in lines[1]
+
+
+def test_csv_cells_cannot_become_formulas() -> None:
+    from app.admin.routes import _csv_cell
+
+    got = [_csv_cell(v) for v in ("=1+1", "+3", "-2", "@SUM", "ok", None, 5)]
+    assert got == ["'=1+1", "'+3", "'-2", "'@SUM", "ok", "", "5"]
+
+
+def test_team_add_edit_remove(client: TestClient, sync_db: Session) -> None:
+    from app.db.models import AllowedUser, UserRole
+
+    assert client.get("/admin/team").status_code == 303
+    token = login(client)
+    page = client.get("/admin/team").text
+    assert "1001" in page and "bootstrap" in page  # the test settings' bootstrap approver
+
+    r = post(client, "/admin/team", {"telegram_id": "abc", "role": "approver"}, token)
+    assert r.status_code == 422 and "positive number" in r.text
+    r = post(client, "/admin/team", {"telegram_id": "1001", "role": "operator"}, token)
+    assert r.status_code == 422 and "already on the team" in r.text
+
+    r = client.post(
+        "/admin/team",
+        data={
+            "csrf": token,
+            "telegram_id": "2007",
+            "role": "approver",
+            "display_name": "Maria",
+            "companies": ["Z", "NOPE"],
+        },
+    )
+    assert r.status_code == 303
+    u = sync_db.scalar(select(AllowedUser).where(AllowedUser.telegram_id == 2007))
+    assert (u.role, u.display_name, u.companies) == (UserRole.APPROVER, "Maria", ["Z"])
+
+    r = post(
+        client, "/admin/team", {"id": str(u.id), "telegram_id": "2007", "role": "operator"}, token
+    )
+    assert r.status_code == 303
+    sync_db.expire_all()
+    u = sync_db.get(AllowedUser, u.id)
+    assert (u.role, u.companies) == (UserRole.OPERATOR, [])
+
+    uid = u.id
+    assert post(client, f"/admin/team/{uid}/delete", {}, token).status_code == 303
+    sync_db.expire_all()
+    assert sync_db.get(AllowedUser, uid) is None
+    actions = sync_db.scalars(
+        select(AuditLog.action).where(AuditLog.action.like("user.%")).order_by(AuditLog.id)
+    ).all()
+    assert actions[-3:] == ["user.added", "user.updated", "user.removed"]

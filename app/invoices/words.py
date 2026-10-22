@@ -64,6 +64,8 @@ def int_to_words(n: int) -> str:
 def amount_in_words(amount: Decimal, currency: str) -> str:
     """1619.64 EUR -> 'one thousand six hundred nineteen euro and sixty-four cents'."""
     amount = amount.quantize(Decimal("0.01"))
+    if amount < 0:  # credit notes
+        return "minus " + amount_in_words(-amount, currency)
     whole = int(amount)
     cents = int((amount - whole) * 100)
     one, many, sub_one, sub_many = _CURRENCY.get(currency, (currency, currency, "cent", "cents"))

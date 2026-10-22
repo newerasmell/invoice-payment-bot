@@ -58,6 +58,15 @@ class InvoiceView:
     logo_url: str | None = None
     is_draft: bool = False
     extra: dict[str, str] = field(default_factory=dict)
+    credit_for: str = ""  # credit note: "<number> of <date>" of the credited invoice
+
+    @property
+    def is_credit(self) -> bool:
+        return bool(self.credit_for)
+
+    @property
+    def doc_label(self) -> str:
+        return "Credit note" if self.is_credit else "Invoice"
 
     @property
     def net(self) -> Decimal:

@@ -32,8 +32,9 @@
 {% endmacro %}
 
 {% macro meta_rows() %}
-<tr><th>Invoice No</th><td>{{ inv.number }}</td></tr>
+<tr><th>{{ inv.doc_label }} No</th><td>{{ inv.number }}</td></tr>
 <tr><th>Issue date</th><td>{{ inv.issue_date | date }}</td></tr>
+{% if inv.is_credit %}<tr><th>To invoice</th><td>{{ inv.credit_for }}</td></tr>{% endif %}
 {% if o.show_due_date and inv.due_date %}<tr><th>Due date</th><td>{{ inv.due_date | date }}</td></tr>{% endif %}
 {% if inv.supplier.city %}<tr><th>Place of issue</th><td>{{ inv.supplier.city }}</td></tr>{% endif %}
 <tr><th>Currency</th><td>{{ inv.currency }}</td></tr>
@@ -73,7 +74,7 @@
   <tr><th>Subtotal</th><td>{{ inv.net | money }}</td></tr>
   <tr><th>VAT {{ inv.vat_rate | qty }}%</th><td>{{ inv.vat | money }}</td></tr>
   {% endif %}
-  <tr class="grand"><th>Total due</th><td>{{ inv.currency }} {{ inv.gross | money }}</td></tr>
+  <tr class="grand"><th>{{ "Total credited" if inv.is_credit else "Total due" }}</th><td>{{ inv.currency }} {{ inv.gross | money }}</td></tr>
 </table>
 {% endmacro %}
 
@@ -83,7 +84,7 @@
 {% endmacro %}
 
 {% macro payment() %}
-{% if o.show_bank_details and inv.bank %}
+{% if o.show_bank_details and inv.bank and not inv.is_credit %}
 <table class="kv payment">
   <tr><th>Beneficiary</th><td class="strong">{{ inv.supplier.name }}</td></tr>
   {% if inv.bank.bank_name %}<tr><th>Bank</th><td>{{ inv.bank.bank_name }}</td></tr>{% endif %}

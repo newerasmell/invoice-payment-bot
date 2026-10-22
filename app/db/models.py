@@ -269,6 +269,13 @@ class Invoice(Timestamped, Base):
     approved_by: Mapped[int | None] = mapped_column(BigInteger)
     approved_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     sent_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    # Above MAX_INVOICE_AMOUNT: the first of two distinct approvers.
+    first_approved_by: Mapped[int | None] = mapped_column(BigInteger)
+    first_approved_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    reminded_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))  # overdue
+    # "invoice" or "credit_note" (same number series, negative amounts, credits another invoice)
+    kind: Mapped[str] = mapped_column(String(16), default="invoice", server_default="invoice")
+    credited_invoice_id: Mapped[int | None] = mapped_column(Integer)  # plain int: no table rebuild
 
     __table_args__ = (UniqueConstraint("issuer_id", "number"),)
 
@@ -382,6 +389,10 @@ class PaymentInstruction(Timestamped, Base):
     approved_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     executed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     note: Mapped[str | None] = mapped_column(Text)
+    # Above MAX_PAYMENT_INSTRUCTION_AMOUNT: the first of two distinct approvers.
+    first_approved_by: Mapped[int | None] = mapped_column(BigInteger)
+    first_approved_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    reminded_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
 
 
 class Rule(Timestamped, Base):
@@ -404,6 +415,9 @@ class RuleRun(Base):
     rule_id: Mapped[int] = mapped_column(ForeignKey("rules.id"))
     transfer_id: Mapped[int] = mapped_column(ForeignKey("bank_transfers.id"))
     invoice_id: Mapped[int | None] = mapped_column(ForeignKey("invoices.id"))
+    # Payout rules create a payment instruction instead (plain column: no FK, so adding it
+    # never forces a SQLite table rebuild).
+    instruction_id: Mapped[int | None] = mapped_column(Integer)
     status: Mapped[str] = mapped_column(String(16))  # drafted | skipped | failed
     detail: Mapped[str | None] = mapped_column(Text)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)

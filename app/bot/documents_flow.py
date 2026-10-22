@@ -18,6 +18,7 @@ from sqlalchemy.orm import selectinload
 
 from app.audit import actor_tg, audit
 from app.bot import texts
+from app.bot.approvals import ask_second_approver, user_label
 from app.config import Settings
 from app.db.models import (
     AllowedUser,
@@ -543,7 +544,12 @@ async def on_doc(
 
 
 async def on_instruction(
-    cb: CallbackQuery, callback_data: Ins, db: Database, allowed_user: AllowedUser
+    cb: CallbackQuery,
+    callback_data: Ins,
+    db: Database,
+    settings: Settings,
+    allowed_user: AllowedUser,
+    bot: Bot,
 ) -> None:
     async with db.session() as s:
         instr = await s.get(PaymentInstruction, callback_data.id)
@@ -565,7 +571,29 @@ async def on_instruction(
                 if allowed_user.role != UserRole.APPROVER:
                     await cb.answer(texts.ONLY_APPROVERS_PAYMENT, show_alert=True)
                     return
-                await ins.approve(s, instr, allowed_user.telegram_id)
+                if not await ins.approve(s, settings, instr, allowed_user.telegram_id):
+                    await s.commit()
+                    await cb.answer("First approval recorded")
+                    await cb.message.answer(
+                        texts.first_approval_done(
+                            f"payment instruction #{instr.id}",
+                            instr.amount,
+                            instr.currency,
+                            settings.max_payment_instruction_amount,
+                        )
+                    )
+                    text = (
+                        texts.second_approval_request(
+                            f"payment instruction #{instr.id}", user_label(allowed_user)
+                        )
+                        + "\n\n"
+                        + texts.instruction_card(instr, payer)
+                    )
+                    if not await ask_second_approver(
+                        bot, db, payer, allowed_user.telegram_id, text, card_kb(instr)
+                    ):
+                        await cb.message.answer(texts.NO_SECOND_APPROVER)
+                    return
             elif callback_data.action == "cx":
                 await ins.cancel(s, instr, actor_tg(allowed_user.telegram_id))
         except ins.InstructionError as e:
@@ -606,6 +634,22 @@ async def cmd_instructions(message: Message, db: Database) -> None:
             [[(f"Show #{i.id}", Ins(action="show", id=i.id).pack())] for i, _ in rows[:10]]
         ),
     )
+
+
+async def send_instruction_card(
+    bot: Bot, db: Database, instruction_id: int, recipients: list[int], header: str | None = None
+) -> None:
+    async with db.session() as s:
+        instr = await s.get(PaymentInstruction, instruction_id)
+        payer = await s.get(Company, instr.from_company_id)
+        text, kb = texts.instruction_card(instr, payer), card_kb(instr)
+    if header:
+        text = f"{header}\n{text}"
+    for chat in recipients:
+        try:
+            await bot.send_message(chat, text, reply_markup=kb)
+        except Exception:
+            log.warning("could not send instruction to %s", chat, exc_info=True)
 
 
 async def notify_executed(

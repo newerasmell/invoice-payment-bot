@@ -7,20 +7,30 @@
     <h1>Rules</h1>
     <p class="sub">Automatic drafts when a payment arrives. Every draft still needs approval in Telegram.</p>
   </div>
-  <a class="btn" href="/admin/rules/new">+ New rule</a>
+  <div class="actions">
+    <a class="btn" href="/admin/rules/new">+ Invoice rule</a>
+    <a class="btn secondary" href="/admin/rules/new?type=payout">+ Payout rule</a>
+  </div>
 </div>
 <div class="panel">
   {% if rules %}
   <table class="list">
-    <thead><tr><th>When</th><th>Then</th><th>Invoice line</th><th>Status</th><th></th></tr></thead>
+    <thead><tr><th>When</th><th>Then</th><th>Line / reference</th><th>Status</th><th></th></tr></thead>
     <tbody>
     {% for r in rules %}
     {% set t = companies.get(r.trigger_company_id) %}{% set g = companies.get(r.target_company_id) %}
     {% set c = contracts.get((r.params or {}).get("contract_id")) %}
     <tr>
       <td><span class="badge">{{ t.code if t else "?" }}</span> receives a payment of Y</td>
+      {% if r.type.value == "PAYOUT_ON_RECEIPT" %}
+      {% set p = r.params or {} %}
+      <td>pay out to {% if p.get("iban") %}<b>{{ p.get("name") }}</b> <span class="mono small">{{ p.get("iban") }}</span>{% else %}<span class="badge">{{ g.code if g else "?" }}</span>{% endif %}:
+        {% if p.get("mode") == "percent" %}{{ p.get("value") }}% of Y{% elif p.get("mode") == "fixed" %}{{ p.get("value") }}{% else %}Y − {{ p.get("value") }}{% endif %}</td>
+      <td class="small">{{ p.get("reference_template", "") }}</td>
+      {% else %}
       <td><span class="badge">{{ g.code if g else "?" }}</span> invoices <span class="badge">{{ t.code if t else "?" }}</span> for Y − {{ (r.params or {}).get("percent", "1.5") }}%</td>
       <td class="small">{{ c.service_description if c else "" }}</td>
+      {% endif %}
       <td>{% if r.enabled %}<span class="badge ok">enabled</span>{% else %}<span class="badge grey">paused</span>{% endif %}</td>
       <td style="text-align:right"><a class="btn secondary small" href="/admin/rules/{{ r.id }}">Edit</a></td>
     </tr>

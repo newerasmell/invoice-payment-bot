@@ -64,11 +64,6 @@ async def create_from_document(
             "Couldn't read: " + ", ".join(problems) + ". Send a clearer photo or the PDF."
         )
     assert doc.total is not None and doc.currency is not None
-    if doc.total > settings.max_payment_instruction_amount:
-        raise InstructionError(
-            f"{fmt_money(doc.total, doc.currency)} is above the payment limit of "
-            f"{settings.max_payment_instruction_amount:,.2f} (MAX_PAYMENT_INSTRUCTION_AMOUNT)."
-        )
     if doc.invoice_number:
         dup = await session.scalar(
             select(PaymentInstruction).where(
@@ -157,9 +152,88 @@ async def _link_our_invoice(
     return f"Matches our invoice {inv.number} issued by {issuer.code}."
 
 
-async def approve(session: AsyncSession, instr: PaymentInstruction, approver_tg: int) -> None:
+async def propose_payout(
+    session: AsyncSession,
+    settings: Settings,
+    *,
+    rule,
+    payer: Company,  # noqa: ANN001
+    target: Company | None,
+    amount,
+    currency: str,
+    reference: str,  # noqa: ANN001
+    iban: str | None,
+    name: str | None,
+) -> PaymentInstruction:
+    """Flow E: an instruction from a payout rule (to one of our companies or a fixed IBAN)."""
+    from app.companies import default_bank_account
+
+    if iban:
+        to_iban, to_name, bic, bank = normalize_iban(iban), name or "", None, None
+    else:
+        acc = default_bank_account(target, currency) if target else None
+        if acc is None or acc.currency != currency:
+            raise InstructionError(
+                f"{target.code if target else 'Destination'} has no bank account in {currency}"
+            )
+        to_iban, bic, bank = acc.iban, acc.bic, acc.bank_name
+        to_name = target.legal_name or target.name
+    if not iban_is_valid(to_iban):
+        raise InstructionError(f"destination IBAN {to_iban} is not valid")
+    if not to_name:
+        raise InstructionError("destination name is missing")
+    instr = PaymentInstruction(
+        from_company_id=payer.id,
+        to_iban=to_iban,
+        to_name=to_name,
+        to_bic=bic,
+        to_bank_name=bank,
+        amount=amount,
+        currency=currency,
+        reference=reference,
+        linked_rule_id=rule.id,
+        status=InstructionStatus.PROPOSED,
+        note=f"Created by payout rule #{rule.id}.",
+    )
+    session.add(instr)
+    await session.flush()
+    audit(
+        session,
+        "system",
+        "instruction.proposed",
+        f"instruction:{instr.id}",
+        {"payer": payer.code, "to": to_name, "amount": str(amount), "rule": rule.id},
+    )
+    return instr
+
+
+def needs_two_approvals(instr: PaymentInstruction, settings: Settings) -> bool:
+    """Above MAX_PAYMENT_INSTRUCTION_AMOUNT a payment needs two different approvers."""
+    return instr.amount > settings.max_payment_instruction_amount
+
+
+async def approve(
+    session: AsyncSession, settings: Settings, instr: PaymentInstruction, approver_tg: int
+) -> bool:
+    """True when the instruction is approved; False when only the first of two approvals
+    needed above the limit was recorded."""
     if instr.status != InstructionStatus.PROPOSED:
         raise InstructionError(f"Instruction #{instr.id} is already {instr.status.value}")
+    if needs_two_approvals(instr, settings):
+        if instr.first_approved_by is None:
+            instr.first_approved_by, instr.first_approved_at = approver_tg, datetime.now(UTC)
+            audit(
+                session,
+                f"tg:{approver_tg}",
+                "instruction.first_approval",
+                f"instruction:{instr.id}",
+                {"amount": str(instr.amount), "to": instr.to_name},
+            )
+            return False
+        if instr.first_approved_by == approver_tg:
+            raise InstructionError(
+                "You already gave the first approval. A different approver must give the second."
+            )
     instr.status = InstructionStatus.AWAITING_BANK
     instr.approved_by, instr.approved_at = approver_tg, datetime.now(UTC)
     audit(
@@ -169,6 +243,7 @@ async def approve(session: AsyncSession, instr: PaymentInstruction, approver_tg:
         f"instruction:{instr.id}",
         {"amount": str(instr.amount), "to": instr.to_name},
     )
+    return True
 
 
 async def cancel(session: AsyncSession, instr: PaymentInstruction, actor: str) -> None:

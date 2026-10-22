@@ -6,7 +6,7 @@ from html import escape
 from typing import Any
 
 from aiogram import Bot, F, Router
-from aiogram.filters import Command, StateFilter
+from aiogram.filters import Command, CommandObject, StateFilter
 from aiogram.filters.callback_data import CallbackData
 from aiogram.fsm.context import FSMContext
 from aiogram.fsm.state import State, StatesGroup
@@ -23,6 +23,7 @@ from sqlalchemy.orm import selectinload
 
 from app.audit import actor_tg, audit
 from app.bot import texts
+from app.bot.approvals import ask_second_approver, user_label
 from app.companies import counterparty_for_company
 from app.config import Settings
 from app.db.models import (
@@ -593,6 +594,8 @@ async def on_invoice_action(
 ) -> None:
     action, inv_id = callback_data.action, callback_data.id
     actor = actor_tg(allowed_user.telegram_id)
+    if action in ("ap", "rj") and (await state.get_data()).get("invoice_id") == inv_id:
+        await state.clear()  # approving/rejecting ends a pending edit of the same draft
     async with db.session() as s:
         try:
             b = await svc.load_bundle(s, inv_id)
@@ -613,6 +616,28 @@ async def on_invoice_action(
                 return
             except PdfUnavailable as e:
                 await cb.answer(f"Cannot approve: {e}", show_alert=True)
+                return
+            if pdf is None:
+                await cb.answer("First approval recorded")
+                await cb.message.reply(
+                    texts.first_approval_done(
+                        "this invoice",
+                        b.invoice.amount_gross,
+                        b.invoice.currency,
+                        settings.max_invoice_amount,
+                    )
+                )
+                text = (
+                    texts.second_approval_request(
+                        f"invoice draft #{inv_id}", user_label(allowed_user)
+                    )
+                    + "\n\n"
+                    + texts.draft_caption(b.invoice, b.issuer, b.client, [])
+                )
+                if not await ask_second_approver(
+                    bot, db, b.issuer, allowed_user.telegram_id, text, draft_kb(inv_id)
+                ):
+                    await cb.message.answer(texts.NO_SECOND_APPROVER)
                 return
             await cb.answer("Approved")
             await cb.message.edit_reply_markup(reply_markup=None)
@@ -639,6 +664,12 @@ async def on_invoice_action(
         if action == "ed":
             if b.invoice.status != InvoiceStatus.DRAFT:
                 await cb.answer("Only drafts can be edited", show_alert=True)
+                return
+            if b.invoice.kind == svc.CREDIT_NOTE:
+                await cb.answer(
+                    "A credit note mirrors its invoice. Reject it and create it again instead.",
+                    show_alert=True,
+                )
                 return
             await cb.answer()
             await state.set_state(Flow.editing)
@@ -690,11 +721,17 @@ async def on_edit_text(
         return
     async with db.session() as s:
         try:
-            current = svc.draft_as_dict(await svc.load_bundle(s, inv_id))
+            b = await svc.load_bundle(s, inv_id)
         except svc.InvoiceError:
+            b = None
+        if b is None or b.invoice.status != InvoiceStatus.DRAFT:
+            # The draft was approved/rejected meanwhile: leave edit mode and treat the message
+            # as a new request instead of failing on every message.
             await state.clear()
-            await message.answer(texts.FLOW_EXPIRED)
+            await message.answer(texts.EDIT_STOPPED)
+            await on_text(message, state, db, parser, settings, allowed_user)
             return
+        current = svc.draft_as_dict(b)
     files = await _attachments(message)
     if isinstance(files, str):
         await message.answer(files)
@@ -752,6 +789,42 @@ async def cmd_cancel(message: Message, state: FSMContext) -> None:
     await message.answer(texts.CANCELLED)
 
 
+async def cmd_credit(
+    message: Message, command: CommandObject, bot: Bot, db: Database, allowed_user: AllowedUser
+) -> None:
+    number, _, reason = (command.args or "").strip().partition(" ")
+    if not number:
+        await message.answer(texts.CREDIT_USAGE)
+        return
+    async with db.session() as s:
+        inv_id = await s.scalar(
+            select(Invoice.id).where(Invoice.number == number, Invoice.kind == "invoice")
+        )
+        if inv_id is None:
+            await message.answer(texts.CREDIT_NOT_FOUND.format(number=escape(number)))
+            return
+        b = await svc.load_bundle(s, inv_id)
+        if allowed_user.companies and b.issuer.code not in {
+            c.upper() for c in allowed_user.companies
+        }:
+            await message.answer(texts.NOT_YOUR_COMPANY)
+            return
+        try:
+            note = await svc.create_credit_note(
+                s, b, reason=reason, created_by=allowed_user.telegram_id
+            )
+        except svc.InvoiceError as e:
+            await message.answer(f"❗ {escape(str(e))}")
+            return
+        await s.commit()
+        note_id = note.id
+        header = texts.CREDIT_HEADER.format(
+            number=escape(number),
+            date=b.invoice.issue_date.strftime("%d.%m.%Y") if b.invoice.issue_date else "",
+        )
+    await send_draft_preview(bot, message.chat.id, db, note_id, header=header)
+
+
 async def cmd_invoices(message: Message, db: Database) -> None:
     async with db.session() as s:
         rows = (
@@ -777,8 +850,9 @@ async def cmd_invoices(message: Message, db: Database) -> None:
 
 def make_router() -> Router:
     r = Router(name="invoices")
-    r.message.register(cmd_cancel, Command("cancel"))
+    r.message.register(cmd_cancel, Command("cancel", "stop"))
     r.message.register(cmd_invoices, Command("invoices"))
+    r.message.register(cmd_credit, Command("credit"))
     content = (F.text & ~F.text.startswith("/")) | F.photo | F.document
     r.message.register(on_edit_text, StateFilter(Flow.editing), content)
     r.message.register(on_collect, StateFilter(Flow.collecting), content)

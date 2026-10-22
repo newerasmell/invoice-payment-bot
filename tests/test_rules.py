@@ -151,13 +151,13 @@ async def test_include_internal_and_disabled(db, bank, settings) -> None:
     assert [e for e in await _pay(bank, settings, db, "700.00") if e.kind == "rule_draft"] == []
 
 
-async def test_limit_failure_is_recorded(db, bank, settings) -> None:
-    await _rule(db)
-    events = await _pay(bank, settings, db, "60000.00")
+async def test_failure_is_recorded(db, bank, settings) -> None:
+    await _rule(db, percent="150")
+    events = await _pay(bank, settings, db, "6000.00")
     assert [e for e in events if e.kind == "rule_draft"] == []
     async with db.session() as s:
         run = await s.scalar(select(RuleRun))
-        assert run.status == "failed" and "above the limit" in run.detail
+        assert run.status == "failed" and "not positive" in run.detail
 
 
 async def test_bot_flow_rule_draft_then_approve(harness: BotHarness, db) -> None:
@@ -175,3 +175,22 @@ async def test_bot_flow_rule_draft_then_approve(harness: BotHarness, db) -> None
 
     [listing] = [c.text for c in await harness.send_raw("/rules") if isinstance(c, SendMessage)]
     assert "When <b>X</b> receives a payment → <b>Z</b>" in listing and "−1.5%" in listing
+
+
+async def test_bot_large_rule_invoice_needs_second_approver(harness: BotHarness, db) -> None:
+    from app.db.models import AllowedUser, UserRole
+
+    async with db.session() as s:
+        s.add(AllowedUser(telegram_id=2003, role=UserRole.APPROVER))
+        await s.commit()
+    await _rule(db)
+    calls = await harness.send_raw('/dev_simulate_incoming X 60000 "Client Ltd" order 78')
+    [doc] = [c for c in calls if isinstance(c, SendDocument) and c.chat_id == 1001]
+    inv_id = int(doc.reply_markup.inline_keyboard[0][0].callback_data.rsplit(":", 1)[1])
+    calls = await harness.click(Inv(action="ap", id=inv_id).pack())
+    [ask] = [c for c in calls if isinstance(c, SendMessage) and "Second approval" in c.text]
+    assert ask.chat_id == 2003 and "59,100.00" in ask.text
+    assert not [c for c in calls if isinstance(c, SendDocument)]
+    calls = await harness.click(Inv(action="ap", id=inv_id).pack(), user_id=2003)
+    [issued] = [c for c in calls if isinstance(c, SendDocument)]
+    assert "Invoice 0000000001</b> approved" in issued.caption

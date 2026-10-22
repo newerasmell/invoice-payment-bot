@@ -261,6 +261,38 @@ Write pytest tests for: amount math (1.5% rounding), matching logic (HIGH/MEDIUM
   Supplier documents are stored under `UPLOADS_DIR/documents/`. Nothing moves money.
 - Admin "Test connection" shows the server's outbound IP (what Paynetics allow-lists).
 
+## 10b7. Flow E payout rules (2026-10-22)
+- `PAYOUT_ON_RECEIPT` (`rules/engine.py::run_payout_rules`, called from `sync.process_transfer`
+  after receipt rules): params `mode` (`percent|fixed|remainder`), `value`, optional external
+  `iban`/`name` (otherwise the target company's default account in the currency),
+  `reference_template` (`{date} {payer} {amount} {currency} {reference}`), optional
+  `from_company_id` (only payments from that company). It only *proposes* a
+  `PaymentInstruction` (`instructions.propose_payout`, limit-checked); `RuleRun.instruction_id`
+  records it. Approval and execution follow the normal instruction flow; nothing moves money.
+- `tests/test_payout.py::test_full_cycle_x_z_g` is the M5 end-to-end check in mock mode.
+
+## 10b8. M6 hardening (2026-10-22)
+- Amount limits never block a draft or instruction. Above `MAX_INVOICE_AMOUNT` /
+  `MAX_PAYMENT_INSTRUCTION_AMOUNT`, `service.approve` / `instructions.approve` record the
+  first approval (`first_approved_by/at`, no number assigned) and require a different approver
+  for the second; `bot/approvals.ask_second_approver` sends the item to the other approvers of
+  that company. Editing a draft clears a pending first approval.
+- `app/reminders.py` (task started in `main.lifespan`): overdue APPROVED/SENT invoices and
+  AWAITING_BANK instructions older than `INSTRUCTION_TIMEOUT_HOURS`; `reminded_at` limits
+  repeats to `REMINDER_REPEAT_HOURS`.
+- Admin: **Team** (`/admin/team`, the `AllowedUser` whitelist; read on every update, so changes
+  apply at once; `BOOTSTRAP_APPROVER_IDS` are re-added on restart) and **Audit log**
+  (`/admin/audit`, `/admin/audit.csv` with formula-injection-safe cells).
+
+## 10b9. Credit notes (2026-10-22)
+- `Invoice.kind` = `invoice|credit_note`, `credited_invoice_id` (plain int). `/credit <number>
+  [reason]` → `service.create_credit_note` (full amount, negated lines, DRAFT); approval numbers
+  it in the same series, reuses the original's frozen parties and sets the original CANCELLED
+  (PAID stays PAID). Credit notes are never matched to incoming payments, can't be edited, and
+  render as "CREDIT NOTE" with a "To invoice" row and no payment block.
+- Bot edit mode ends when its draft is approved/rejected, or on the next message if it is no
+  longer a draft; `/cancel` and `/stop` always leave it.
+
 ## 10c. Deployment and migrations
 - Production is a single Render web service from `render.yaml` (Blueprint), SQLite on a
   persistent disk at `/var/data`, no staging. Every push to `main` deploys to production.

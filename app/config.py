@@ -70,6 +70,12 @@ class Settings(BaseSettings):
     max_invoice_amount: Decimal = Decimal("50000.00")
     max_payment_instruction_amount: Decimal = Decimal("50000.00")
 
+    # Reminders (M6): overdue invoices and approved payments the bank hasn't shown yet.
+    reminders_enabled: bool = True
+    reminder_check_seconds: int = 3600
+    reminder_repeat_hours: int = 24
+    instruction_timeout_hours: int = 48
+
     default_currency: str = "EUR"
 
     @field_validator("bootstrap_approver_ids", mode="before")

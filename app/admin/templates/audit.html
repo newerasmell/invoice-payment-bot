@@ -1,0 +1,46 @@
+{% extends "base.html" %}
+{% set section = "audit" %}
+{% block title %}Audit log{% endblock %}
+{% block content %}
+<h1>Audit log</h1>
+<p class="sub">Every state change: drafts, approvals, deliveries, payments, rules and admin edits. Times are UTC.</p>
+<div class="panel">
+  <form method="get" class="audit-filters">
+    <div class="field"><label>Action</label>
+      <input type="text" name="action" list="audit-actions" value="{{ flt.action }}" placeholder="e.g. invoice.approved">
+      <datalist id="audit-actions">{% for a in actions %}<option value="{{ a }}">{% endfor %}</datalist>
+    </div>
+    <div class="field"><label>Entity</label><input type="text" name="entity" value="{{ flt.entity }}" placeholder="e.g. invoice:12"></div>
+    <div class="field"><label>Actor</label><input type="text" name="actor" value="{{ flt.actor }}" placeholder="tg:… / admin / system"></div>
+    <div class="field"><label>From</label><input type="date" name="from" value="{{ flt['from'] }}"></div>
+    <div class="field"><label>To</label><input type="date" name="to" value="{{ flt.to }}"></div>
+    <div class="actions">
+      <button class="btn small" type="submit">Filter</button>
+      <a class="btn secondary small" href="/admin/audit">Clear</a>
+      <a class="btn secondary small" href="/admin/audit.csv{{ '?' + query if query }}">Export CSV</a>
+    </div>
+  </form>
+</div>
+<div class="panel">
+  {% if rows %}
+  <table class="list">
+    <thead><tr><th>Time (UTC)</th><th>Actor</th><th>Action</th><th>Entity</th><th>Details</th></tr></thead>
+    <tbody>
+    {% for r in rows %}
+    <tr>
+      <td class="small" style="white-space:nowrap">{{ r.ts.strftime("%d.%m.%Y %H:%M:%S") }}</td>
+      <td class="mono small">{{ r.actor }}</td>
+      <td><span class="badge">{{ r.action }}</span></td>
+      <td class="mono small">{{ r.entity or "" }}</td>
+      <td class="mono small audit-payload">{% for k, v in (r.payload or {}).items() %}<span><b>{{ k }}</b>={{ v }}</span> {% endfor %}</td>
+    </tr>
+    {% endfor %}
+    </tbody>
+  </table>
+  <div class="actions" style="margin-top:14px">
+    {% if page > 1 %}<a class="btn secondary small" href="?{{ query ~ '&' if query }}page={{ page - 1 }}">← Newer</a>{% endif %}
+    {% if more %}<a class="btn secondary small" href="?{{ query ~ '&' if query }}page={{ page + 1 }}">Older →</a>{% endif %}
+  </div>
+  {% else %}<div class="empty">Nothing matches.</div>{% endif %}
+</div>
+{% endblock %}
