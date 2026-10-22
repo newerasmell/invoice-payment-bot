@@ -100,6 +100,7 @@
     <code>{{ request.base_url }}webhooks/paynetics</code>
   </p>
   {% if bank_test is defined %}
+    <p class="small">This server's outbound IP right now: <code>{{ bank_test.outbound_ip }}</code> (the address Paynetics must allow-list).</p>
     {% if bank_test.error %}
     <div class="alert">{{ bank_test.error }}</div>
     {% else %}

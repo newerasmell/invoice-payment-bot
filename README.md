@@ -32,7 +32,16 @@ from code: transfers are executed by a human in the bank panel. See `CLAUDE.md` 
   invoice line. The draft goes to Telegram with Approve / Edit / Reject. Payments from our own
   companies do not trigger rules unless enabled per rule; each payment fires a rule at most once
   (`rule_runs`). `/rules` lists them.
-- Next: M5 (inbox + payment instructions X → Z → G), public invoice-request form, M6.
+- **Documents (done):** send a photo/PDF to the bot and pick **Issue a similar invoice**,
+  **Save as client**, **Create/update our company** (shown for confirmation first) or
+  **Invoice to pay**; a caption like "pay this" picks the action directly.
+- **M5 part 1 (done): payment instructions.** "Invoice to pay" reads supplier, IBAN (checksum),
+  amount, reference and due date, resolves which of our companies pays, and shows a card with
+  **Approve payment / Cancel** (limit `MAX_PAYMENT_INSTRUCTION_AMOUNT`, no duplicates per
+  supplier invoice). After approval you pay in the Paynetics panel; the outgoing transfer (same
+  payer, amount, currency + IBAN or reference) marks it **EXECUTED** and notifies. Invoices
+  from our own companies are cross-checked with what we issued. `/instructions` lists open ones.
+- Next: Flow E (payout rule Z → G), IMAP inbox, reminders, public invoice-request form, M6.
 
 ### Connecting Paynetics
 
@@ -91,6 +100,8 @@ configured. Only approvers can approve; operators can draft.
 | `/invoices` | last 10 invoices, with Send buttons for approved ones |
 | `/payments` | check the bank now and list recent transfers with their match |
 | `/rules` | automatic invoicing rules |
+| `/instructions` | open payment instructions (payments we have to make) |
+| *photo / PDF* | choose: similar invoice, save client, our company, invoice to pay |
 | `/cancel` | stop editing a draft |
 | `/balance <company>` | balance of the company's default account |
 | `/dev_simulate_incoming <company> <amount> <payer> [reference]` | mock bank only |

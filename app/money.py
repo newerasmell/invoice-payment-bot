@@ -1,5 +1,6 @@
 """Money helpers. Amounts are always Decimal, rounded half-up to 2 decimals."""
 
+import re
 from decimal import ROUND_HALF_UP, Decimal, InvalidOperation
 
 CENT = Decimal("0.01")
@@ -7,6 +8,26 @@ CENT = Decimal("0.01")
 
 class InvalidAmount(ValueError):
     pass
+
+
+_CURRENCY_MARKS = re.compile(r"(€|\$|£|EUR|USD|GBP|BGN|лв\.?)", re.I)
+
+
+def _normalize(raw: str) -> str:
+    """'76,908.00' / '76.908,00' / '12,600' / '1 200,50' / '€ 60' -> plain '1234.56' form."""
+    s = _CURRENCY_MARKS.sub("", raw.strip())
+    s = re.sub(r"[\s\u00a0\u202f']", "", s)
+    if "," in s and "." in s:
+        # The later separator is the decimal one.
+        if s.rfind(",") > s.rfind("."):
+            return s.replace(".", "").replace(",", ".")
+        return s.replace(",", "")
+    if "," in s:
+        # "12,600" / "1,234,567" are thousands; "1200,5" / "1 200,50" use a decimal comma.
+        if re.fullmatch(r"-?\d{1,3}(,\d{3})+", s):
+            return s.replace(",", "")
+        return s.replace(",", ".")
+    return s
 
 
 def to_money(value: str | int | Decimal) -> Decimal:
@@ -17,9 +38,7 @@ def to_money(value: str | int | Decimal) -> Decimal:
     if isinstance(value, float):
         raise TypeError("floats are not accepted for money; pass a str or Decimal")
     if isinstance(value, str):
-        cleaned = value.strip().replace(" ", "").replace(" ", "")
-        if "," in cleaned and "." not in cleaned:
-            cleaned = cleaned.replace(",", ".")
+        cleaned = _normalize(value)
         try:
             value = Decimal(cleaned)
         except InvalidOperation as e:

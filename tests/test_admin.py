@@ -418,8 +418,14 @@ def test_bank_api_panel(client: TestClient, sync_db: Session, monkeypatch) -> No
     cid = company_id(sync_db, "X")
     page = client.get(f"/admin/companies/{cid}").text
     assert "PAYNETICS_X_ACCESS_TOKEN" in page and "webhooks/paynetics" in page
+    from app.admin import routes as _routes
+
+    async def no_ip() -> str:
+        return "198.51.100.1"
+
+    monkeypatch.setattr(_routes, "outbound_ip", no_ip)
     r = post(client, f"/admin/companies/{cid}/bank-test", {}, token)
-    assert "No credentials configured" in r.text
+    assert "No credentials configured" in r.text and "198.51.100.1" in r.text
 
     from app.admin import routes
     from app.bank.base import Balance
@@ -450,11 +456,15 @@ def test_bank_api_panel(client: TestClient, sync_db: Session, monkeypatch) -> No
         async def aclose(self) -> None:
             pass
 
+    async def fake_ip() -> str:
+        return "203.0.113.7"
+
+    monkeypatch.setattr(routes, "outbound_ip", fake_ip)
     monkeypatch.setenv("PAYNETICS_X_ACCESS_TOKEN", "tok")
     monkeypatch.setenv("PAYNETICS_X_SECRET_KEY", "sec")
     monkeypatch.setattr(routes, "PayneticsClient", FakeClient)
     html = post(client, f"/admin/companies/{cid}/bank-test", {}, token).text
-    assert "Connected as <b>Company X Ltd</b>" in html
+    assert "Connected as <b>Company X Ltd</b>" in html and "203.0.113.7" in html
     assert "41499999999" in html and html.count('badge ok">yes') == 1
 
 

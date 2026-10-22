@@ -111,6 +111,7 @@ class FakeParser:
     def __init__(self) -> None:
         self.queue: list = []
         self.party_queue: list = []
+        self.doc_queue: list = []
         self.calls: list = []
 
     async def parse(self, text, ctx, attachments=()):  # noqa: ANN001, ANN201
@@ -119,6 +120,10 @@ class FakeParser:
         if isinstance(item, Exception):
             raise item
         return item
+
+    async def read_document(self, text, attachments):  # noqa: ANN001, ANN201
+        self.calls.append(("doc", text, attachments))
+        return self.doc_queue.pop(0)
 
     async def extract_party(self, text, known, wanted, attachments=()):  # noqa: ANN001, ANN201
         self.calls.append(("party", text, wanted, attachments))

@@ -109,3 +109,33 @@ async def test_m3_upgrade_with_existing_rows(tmp_path: Path) -> None:
             1000,
         )
         assert conn.execute("SELECT count(*) FROM payment_matches").fetchone() == (1,)
+
+
+async def test_m5_upgrade_with_existing_instruction(tmp_path: Path) -> None:
+    import asyncio
+
+    from alembic import command
+
+    from app.db.migrate import alembic_config
+
+    db = tmp_path / "m.db"
+    url = f"sqlite+aiosqlite:///{db}"
+    await asyncio.to_thread(command.upgrade, alembic_config(url), "b7f517ececf5")
+    with sqlite3.connect(db) as conn:
+        conn.execute(
+            "INSERT INTO companies (id, code, name, invoice_prefix, invoice_next_number,"
+            " default_currency, default_vat_rate, default_payment_terms_days, created_at,"
+            " updated_at) VALUES (1, 'X', 'X', '', 1, 'EUR', 20, 14, '2026-10-20', '2026-10-20')"
+        )
+        conn.execute(
+            "INSERT INTO payment_instructions (id, from_company_id, to_iban, to_name, amount,"
+            " currency, reference, status, created_at, updated_at) VALUES (1, 1,"
+            " 'BG80BNBG96611020345678', 'Supplier', 120000, 'EUR', 'INV 1', 'PROPOSED',"
+            " '2026-10-20', '2026-10-20')"
+        )
+    await upgrade_to_head(url)
+    with sqlite3.connect(db) as conn:
+        row = conn.execute(
+            "SELECT status, amount, supplier_invoice_number, executed_at FROM payment_instructions"
+        ).fetchone()
+        assert row == ("PROPOSED", 120000, None, None)

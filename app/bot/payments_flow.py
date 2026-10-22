@@ -75,6 +75,13 @@ async def notify(bot: Bot | None, db: Database, events: list[psync.PaymentEvent]
         if ev.kind == "rule_draft":
             await _notify_rule_draft(bot, db, ev)
             continue
+        if ev.kind == "executed" and ev.instruction_id:
+            from app.bot.documents_flow import notify_executed  # avoid an import cycle
+
+            async with db.session() as s:
+                company = await s.get(Company, ev.company_id) if ev.company_id else None
+            await notify_executed(bot, db, ev.instruction_id, await _recipients(db, company))
+            continue
         async with db.session() as s:
             bt, company = await psync.load_for_message(s, ev)
             if ev.kind == "paid":

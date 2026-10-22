@@ -370,6 +370,18 @@ class PaymentInstruction(Timestamped, Base):
         _enum(InstructionStatus), default=InstructionStatus.PROPOSED
     )
     matched_transfer_id: Mapped[int | None] = mapped_column(ForeignKey("bank_transfers.id"))
+    # From the supplier's invoice (Flow D); all optional so older rows stay valid.
+    to_bic: Mapped[str | None] = mapped_column(String(16))
+    to_bank_name: Mapped[str | None] = mapped_column(String(255))
+    supplier_invoice_number: Mapped[str | None] = mapped_column(String(64))
+    supplier_invoice_date: Mapped[date | None] = mapped_column(Date)
+    due_date: Mapped[date | None] = mapped_column(Date)
+    document_path: Mapped[str | None] = mapped_column(String(512))
+    created_by: Mapped[int | None] = mapped_column(BigInteger)
+    approved_by: Mapped[int | None] = mapped_column(BigInteger)
+    approved_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    executed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    note: Mapped[str | None] = mapped_column(Text)
 
 
 class Rule(Timestamped, Base):

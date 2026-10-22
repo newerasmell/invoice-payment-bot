@@ -30,6 +30,7 @@ from app.db.models import (
     TransferDirection,
 )
 from app.db.session import Database
+from app.payments.instructions import match_outgoing
 from app.payments.matching import Candidate, MatchResult, match_transfer
 from app.rules.engine import RuleDraft, run_receipt_rules
 
@@ -41,12 +42,13 @@ _FINAL_NO_ACTION = {"canceled", "cancelled", "reversed"}
 
 @dataclass
 class PaymentEvent:
-    kind: str  # "paid" (auto, HIGH) | "review" (needs a human) | "rule_draft"
+    kind: str  # "paid" (auto, HIGH) | "review" (needs a human) | "rule_draft" | "executed"
     transfer_id: int
     company_id: int | None
     result: MatchResult | None = None
     candidates: list[Candidate] = field(default_factory=list)
     rule_draft: RuleDraft | None = None
+    instruction_id: int | None = None
 
 
 def _norm(acc: str | None) -> str:
@@ -142,8 +144,15 @@ async def process_transfer(
     if bt.status != "processed":
         return []  # new/pending: look again on the next sync
     bt.processed_at = datetime.now(UTC)
+    if bt.direction == TransferDirection.OUTGOING:
+        instr = await match_outgoing(session, bt)
+        return (
+            [PaymentEvent("executed", bt.id, bt.company_id, instruction_id=instr.id)]
+            if instr
+            else []
+        )
     if bt.direction != TransferDirection.INCOMING or bt.company_id is None:
-        return []  # outgoing transfers are matched to payment instructions in M5
+        return []
     events = [await _match(session, bt)]
     if settings is not None:
         for d in await run_receipt_rules(session, settings, bt):

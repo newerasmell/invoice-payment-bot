@@ -5,6 +5,7 @@ from collections.abc import AsyncIterator
 from pathlib import Path
 from typing import Annotated, Any
 
+import httpx
 from fastapi import APIRouter, Depends, HTTPException, Request
 from fastapi.responses import FileResponse, HTMLResponse, RedirectResponse, Response
 from fastapi.templating import Jinja2Templates
@@ -860,6 +861,15 @@ async def invoice_pdf(invoice_id: int, session: DB) -> Response:
 # --- bank API (Paynetics) ---------------------------------------------------------------
 
 
+async def outbound_ip() -> str:
+    """The public IP this server's outgoing requests come from (what Paynetics allow-lists)."""
+    try:
+        async with httpx.AsyncClient(timeout=5) as client:
+            return (await client.get("https://api.ipify.org")).text.strip()[:45]
+    except httpx.HTTPError:
+        return "unknown"
+
+
 def _env_code(code: str) -> str:
     return code.upper().replace("-", "_")
 
@@ -871,7 +881,7 @@ async def company_bank_test(
     company = await load_company(session, company_id)
     await posted(request)
     creds = settings.paynetics_credentials().get(_env_code(company.code))
-    result: dict[str, Any] = {}
+    result: dict[str, Any] = {"outbound_ip": await outbound_ip()}
     if creds is None:
         result["error"] = "No credentials configured for this company."
     else:
@@ -881,6 +891,7 @@ async def company_bank_test(
             accounts = await client.accounts()
             linked = {a.bank_account_ref for a in company.bank_accounts if a.bank_account_ref}
             result = {
+                "outbound_ip": result["outbound_ip"],
                 "profile": profile,
                 "accounts": [(a, a.account in linked) for a in accounts],
             }
@@ -893,6 +904,7 @@ async def company_bank_test(
             )
         except BankError as e:
             result["error"] = str(e)
+            result["outbound_ip"] = await outbound_ip()
             audit(
                 session,
                 ACTOR,

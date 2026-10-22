@@ -76,10 +76,57 @@ class PartyDetails(BaseModel):
         }
 
 
+class DocumentRead(BaseModel):
+    """Both sides and the payment facts of an invoice (or a company details sheet)."""
+
+    _blanks = model_validator(mode="before")(classmethod(lambda cls, d: _blank_to_none(d)))
+
+    doc_type: Literal["invoice", "company_details", "other"]
+    issuer: PartyDetails = Field(default_factory=PartyDetails)  # supplier / company described
+    recipient: PartyDetails = Field(default_factory=PartyDetails)  # bill-to / customer
+    issuer_iban: str | None = None
+    issuer_bic: str | None = None
+    issuer_bank_name: str | None = None
+    invoice_number: str | None = None
+    issue_date: date | None = None
+    due_date: date | None = None
+    currency: str | None = None
+    total: Decimal | None = None  # amount due incl. VAT
+    payment_reference: str | None = None
+
+    @field_validator("issue_date", "due_date", mode="before")
+    @classmethod
+    def _date(cls, v: Any) -> Any:
+        if isinstance(v, str):
+            try:
+                return date.fromisoformat(v.strip())
+            except ValueError:
+                return None
+        return v
+
+    @field_validator("total", mode="before")
+    @classmethod
+    def _total(cls, v: Any) -> Decimal | None:
+        if v in (None, ""):
+            return None
+        try:
+            return to_money(str(v).replace(" ", ""))
+        except InvalidAmount:
+            return None
+
+    @field_validator("currency")
+    @classmethod
+    def _cur(cls, v: str | None) -> str | None:
+        v = (v or "").strip().upper()
+        return v if len(v) == 3 and v.isalpha() else None
+
+
 class InvoiceDraft(BaseModel):
     _blanks = model_validator(mode="before")(classmethod(lambda cls, d: _blank_to_none(d)))
 
-    intent: Literal["invoice", "other"]
+    # invoice: issue one | pay: a supplier invoice we must pay | client: save the client's
+    # details | company: create/update one of OUR company profiles | other
+    intent: Literal["invoice", "pay", "client", "company", "other"]
     issuer_code: str | None = None  # one of our company codes, or None if unclear
     issuer_text: str | None = None  # issuer as the user wrote it
     client_id: int | None = None  # one of the known client ids, or None
@@ -143,11 +190,38 @@ PARTY_SCHEMA: dict[str, Any] = {
     "additionalProperties": False,
 }
 
+_DOC_KEYS = [
+    "doc_type",
+    "issuer",
+    "recipient",
+    "issuer_iban",
+    "issuer_bic",
+    "issuer_bank_name",
+    "invoice_number",
+    "issue_date",
+    "due_date",
+    "currency",
+    "total",
+    "payment_reference",
+]
+DOC_SCHEMA: dict[str, Any] = {
+    "type": "object",
+    "properties": {
+        "doc_type": {"type": "string", "enum": ["invoice", "company_details", "other"]},
+        "issuer": PARTY_SCHEMA,
+        "recipient": PARTY_SCHEMA,
+        **{k: _STR for k in _DOC_KEYS[3:]},
+        "issuer_iban": _STR,
+    },
+    "required": _DOC_KEYS,
+    "additionalProperties": False,
+}
+
 # Amounts travel as strings so they never pass through a float.
 DRAFT_SCHEMA: dict[str, Any] = {
     "type": "object",
     "properties": {
-        "intent": {"type": "string", "enum": ["invoice", "other"]},
+        "intent": {"type": "string", "enum": ["invoice", "pay", "client", "company", "other"]},
         "issuer_code": _STR,
         "issuer_text": _STR,
         "client_id": _STR,
@@ -197,9 +271,11 @@ invoice, a company card, a screenshot) into a structured invoice draft for an in
 tool. You never take actions; a human reviews every draft.
 
 Rules:
-- intent is "invoice" when the operator asks to issue/create/prepare an invoice, or sends a \
-document to invoice from (or, when a current draft is given, asks to change it). Otherwise \
-"other" and leave the rest empty.
+- intent: "invoice" when the operator asks to issue/create/prepare an invoice, or sends a \
+document to invoice from (or, when a current draft is given, asks to change it); "pay" when \
+they send/describe an invoice we RECEIVED and must pay; "client" when they only want to save a \
+client's details; "company" when they want to create/update one of OUR company profiles; \
+otherwise "other". For anything but "invoice", leave the other fields empty.
 - issuer_code: the code of OUR company that issues the invoice, chosen only from "Our companies". \
 Match codes and names loosely (case, abbreviations, missing "Ltd"). If unclear, "" and copy the \
 wording to issuer_text.
@@ -223,6 +299,19 @@ as a string only if stated ("0", "9", "20"), else "". due_in_days: only if state
 never the word "null". client_id and due_in_days are digits as a string, or "".
 - When a current draft is provided, apply the requested change to it and return the full \
 updated draft (keep everything not mentioned)."""
+
+DOC_SYSTEM = """You read an attached business document for an internal invoicing tool. Copy \
+values exactly as printed; never guess; use "" for anything not present.
+- doc_type: "invoice" for an invoice/bill/pro-forma, "company_details" for a company card, \
+registration extract or letterhead with company data, else "other".
+- issuer: the company that ISSUED the invoice (the supplier, "From"); for company_details, the \
+company described. recipient: the "Bill to"/customer company (empty for company_details).
+- company_number is the registration number (EIK, Companies House number, etc.), not the VAT \
+number. Split addresses into street address, city and country.
+- issuer_iban / issuer_bic / issuer_bank_name: the bank details printed for paying the issuer.
+- total: the final amount due including VAT, as a plain decimal string ("76908.00").
+- issue_date / due_date: YYYY-MM-DD. currency: ISO code (EUR, USD, GBP...).
+- payment_reference: the reference the payer is asked to use, if printed (else "")."""
 
 PARTY_SYSTEM = """You extract a company's details from an operator's reply and any attached \
 images or PDFs. Return only what is actually present; copy values exactly; never guess; \
@@ -340,6 +429,21 @@ class InvoiceParser:
                 last_error = e
                 log.warning("invalid draft from model (attempt %d): %s", attempt, e)
         raise ParserError("Could not understand the request; please rephrase it") from last_error
+
+    async def read_document(self, text: str, attachments: tuple[Attachment, ...]) -> DocumentRead:
+        if self._client is None:
+            raise ParserUnavailable("ANTHROPIC_API_KEY is not set")
+        prompt = f"Operator note: {text or '(none)'}"
+        last_error: Exception | None = None
+        for _ in (1, 2):
+            raw = await self._call(DOC_SYSTEM, prompt, DOC_SCHEMA, attachments)
+            try:
+                return DocumentRead.model_validate_json(_strip_fences(raw))
+            except ValidationError as e:
+                last_error = e
+        raise ParserError(
+            "Could not read that document; try a clearer photo or the PDF"
+        ) from last_error
 
     async def extract_party(
         self,

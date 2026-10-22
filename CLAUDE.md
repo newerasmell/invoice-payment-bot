@@ -249,6 +249,18 @@ Write pytest tests for: amount math (1.5% rounding), matching logic (HIGH/MEDIUM
 - Telegram photos and documents (JPEG/PNG/WebP/GIF/PDF, ≤ 10 MB) are passed to Claude as
   image/document blocks; effort is `medium` when attachments are present.
 
+## 10b6. Documents and payment instructions (2026-10-22)
+- A photo/PDF without a caption opens a menu (`bot/documents_flow.py`); with a caption the draft
+  parser's `intent` (`invoice|pay|client|company|other`) routes it. `parser.read_document` returns
+  `DocumentRead` (issuer, recipient, IBAN/BIC, number, dates, total, reference).
+- "Create/update our company" always shows a proposal and needs Confirm; updates fill blanks
+  only. "Save as client" never touches our companies.
+- Payment instructions (`payments/instructions.py`): PROPOSED → AWAITING_BANK (approver,
+  "approved internally") → EXECUTED (outgoing transfer matched in `sync.process_transfer`:
+  same payer company, currency and amount, plus beneficiary IBAN or reference) | CANCELLED.
+  Supplier documents are stored under `UPLOADS_DIR/documents/`. Nothing moves money.
+- Admin "Test connection" shows the server's outbound IP (what Paynetics allow-lists).
+
 ## 10c. Deployment and migrations
 - Production is a single Render web service from `render.yaml` (Blueprint), SQLite on a
   persistent disk at `/var/data`, no staging. Every push to `main` deploys to production.

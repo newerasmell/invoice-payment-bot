@@ -16,10 +16,13 @@ START = (
 HELP = (
     "<b>Invoices</b>\n"
     "Just write what to invoice, e.g. <i>Invoice Client Ltd 1200 EUR from Z, consulting</i>.\n"
-    "I prepare a draft PDF for approval; nothing is sent without your click.\n\n"
+    "I prepare a draft PDF for approval; nothing is sent without your click.\n"
+    "Send a photo or PDF (another invoice, a supplier's invoice to pay, a company card) and "
+    "choose what to do with it.\n\n"
     "<b>Commands</b>\n"
     "/invoices - recent invoices\n"
     "/payments - recent bank transfers\n"
+    "/instructions - payments we have to make\n"
     "/rules - automatic invoicing rules\n"
     "/companies - company profiles\n"
     "/balance &lt;company&gt; - account balance\n"
@@ -299,3 +302,130 @@ def ask_client_details(name: str, missing: str, known: dict[str, str]) -> str:
 
 def details_saved(name: str, fields: str) -> str:
     return f"✅ Saved for {escape(name)}: {escape(fields)}."
+
+
+# --- documents ------------------------------------------------------------------------
+
+DOC_MENU = "What should I do with this document?"
+BTN_DOC_INVOICE = "📄 Issue a similar invoice"
+BTN_DOC_CLIENT = "👤 Save as client"
+BTN_DOC_COMPANY = "🏢 Create/update our company"
+BTN_DOC_PAY = "💳 Invoice to pay"
+READING_DOC = "Reading the document…"
+NOT_A_DOCUMENT = "I couldn't find company or invoice details in that file."
+PICK_PARTY = "Which company in the document do you mean?"
+NO_PARTY = "I couldn't find that company's details in the document."
+PICK_PAYER = "Which of our companies pays this invoice?"
+BTN_CONFIRM = "✅ Confirm"
+
+
+def party_line(p) -> str:  # noqa: ANN001
+    bits = [p.name, p.company_number and f"no {p.company_number}", p.city, p.country]
+    return escape(" · ".join(b for b in bits if b))
+
+
+def client_saved(c, created: bool, changed: list[str], missing: str, link: str | None) -> str:  # noqa: ANN001
+    head = "👤 New client saved" if created else "👤 Client updated"
+    lines = [f"{head}: <b>{escape(c.name)}</b>"]
+    details = [
+        c.eik and f"Company no: {c.eik}",
+        c.vat_id and f"VAT: {c.vat_id}",
+        ", ".join(x for x in (c.address, c.city, c.country) if x),
+        c.email and f"Email: {c.email}",
+    ]
+    lines += [escape(d) for d in details if d]
+    if not created:
+        lines.append(f"Filled: {escape(', '.join(changed))}" if changed else "Nothing new to add.")
+    if missing:
+        lines.append(f"⚠️ Still missing for invoicing: {escape(missing)}")
+    if link:
+        lines.append(f"Edit: {escape(link)}")
+    return "\n".join(lines)
+
+
+def company_proposal(code: str, fields: dict[str, str], bank: str | None, update: bool) -> str:
+    head = (
+        f"🏢 Update our company <b>{escape(code)}</b> with:"
+        if update
+        else f"🏢 Create our company <b>{escape(code)}</b>:"
+    )
+    lines = [head] + [f"• {escape(k)}: {escape(v)}" for k, v in fields.items()]
+    if bank:
+        lines.append(f"• bank account: {escape(bank)}")
+    if update and not fields and not bank:
+        lines.append("Nothing new to add.")
+    lines.append("Confirm to save. You can change anything later in the admin panel.")
+    return "\n".join(lines)
+
+
+def company_saved(code: str, created: bool, link: str | None) -> str:
+    text = f"✅ Company <b>{escape(code)}</b> {'created' if created else 'updated'}."
+    return text + (f"\nCheck it, add the logo and templates: {escape(link)}" if link else "")
+
+
+# --- payment instructions -----------------------------------------------------------------
+
+BTN_APPROVE_PAYMENT, BTN_CANCEL_PAYMENT = "✅ Approve payment", "✖ Cancel"
+ONLY_APPROVERS_PAYMENT = "Only approvers can approve payments."
+NO_INSTRUCTIONS = "No open payment instructions."
+INSTRUCTION_CANCELLED = "Payment instruction cancelled."
+
+
+def instruction_card(i, payer) -> str:  # noqa: ANN001
+    status = {
+        "PROPOSED": "waiting for internal approval",
+        "AWAITING_BANK": "approved, waiting for the bank",
+        "EXECUTED": "executed ✅",
+        "CANCELLED": "cancelled",
+    }.get(i.status.value, i.status.value)
+    lines = [
+        f"💳 <b>Payment instruction #{i.id}</b> — {escape(status)}",
+        f"From: <b>{escape(payer.code)}</b> ({escape(payer.legal_name or payer.name)})",
+        f"To: <b>{escape(i.to_name)}</b>",
+        f"IBAN: <code>{escape(i.to_iban)}</code>",
+    ]
+    if i.to_bic:
+        lines.append(f"BIC: <code>{escape(i.to_bic)}</code>")
+    if i.to_bank_name:
+        lines.append(f"Bank: {escape(i.to_bank_name)}")
+    lines.append(f"Amount: <code>{i.amount:.2f}</code> {escape(i.currency)}")
+    if i.reference:
+        lines.append(f"Reference: <code>{escape(i.reference)}</code>")
+    if i.supplier_invoice_number:
+        inv = f"Invoice {escape(i.supplier_invoice_number)}"
+        if i.supplier_invoice_date:
+            inv += f" of {i.supplier_invoice_date:%d.%m.%Y}"
+        if i.due_date:
+            inv += f", due <b>{i.due_date:%d.%m.%Y}</b>"
+        lines.append(inv)
+    if i.note:
+        lines.append(escape(i.note))
+    return "\n".join(lines)
+
+
+def instruction_approved(i, payer) -> str:  # noqa: ANN001
+    return (
+        f"✅ Approved internally. Now make the transfer in the <b>Paynetics panel of "
+        f"{escape(payer.code)}</b> with exactly these details and confirm it with SMS/push.\n"
+        f"I'll mark instruction #{i.id} as executed when the bank shows the payment."
+    )
+
+
+def instruction_executed(i, payer) -> str:  # noqa: ANN001
+    return (
+        f"✅ <b>Payment executed</b>: {escape(payer.code)} → {escape(i.to_name)} "
+        f"{fmt_money(i.amount, i.currency)}"
+        + (f" (invoice {escape(i.supplier_invoice_number)})" if i.supplier_invoice_number else "")
+        + f". Instruction #{i.id} closed."
+    )
+
+
+def instructions_list(rows) -> str:  # noqa: ANN001
+    out = ["<b>Open payment instructions</b>"]
+    for i, code in rows:
+        due = f", due {i.due_date:%d.%m}" if i.due_date else ""
+        out.append(
+            f"#{i.id} {escape(code)} → {escape(i.to_name[:28])} · "
+            f"{fmt_money(i.amount, i.currency)} · {escape(i.status.value)}{due}"
+        )
+    return "\n".join(out)

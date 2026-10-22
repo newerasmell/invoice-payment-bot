@@ -14,6 +14,7 @@ from app.llm.parser import InvoiceParser
 BOT_COMMANDS = [
     BotCommand(command="invoices", description="Recent invoices"),
     BotCommand(command="payments", description="Recent bank transfers"),
+    BotCommand(command="instructions", description="Payments we have to make"),
     BotCommand(command="rules", description="Automatic invoicing rules"),
     BotCommand(command="companies", description="Company profiles"),
     BotCommand(command="balance", description="Account balance: /balance <company>"),

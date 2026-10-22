@@ -273,13 +273,43 @@ async def on_text(
     if isinstance(files, str):
         await message.answer(files)
         return
+    from app.bot import documents_flow  # avoid an import cycle
+
+    text = _message_text(message)
+    if files and not text.strip():
+        await documents_flow.show_menu(message, state, files)
+        return
+    await start_invoice(message, state, db, parser, settings, allowed_user, text, files)
+
+
+async def start_invoice(
+    message: Message,
+    state: FSMContext,
+    db: Database,
+    parser: InvoiceParser,
+    settings: Settings,
+    allowed_user: AllowedUser,
+    text: str,
+    files: tuple[Attachment, ...],
+    force_invoice: bool = False,
+) -> None:
+    from app.bot import documents_flow  # avoid an import cycle
+
     status = await message.answer(texts.READING)
     try:
         draft, companies, clients, all_companies = await _parse(
-            _message_text(message), allowed_user, db, parser, attachments=files
+            text, allowed_user, db, parser, attachments=files
         )
     except ParserError as e:
         await status.edit_text(f"❗ {escape(str(e))}")
+        return
+    if force_invoice and draft.intent != "invoice":
+        draft.intent = "invoice"
+    if draft.intent in ("pay", "client", "company"):
+        await status.delete()
+        await documents_flow.run_action(
+            message, state, db, parser, settings, allowed_user, draft.intent, text, files
+        )
         return
     if draft.intent != "invoice":
         await status.edit_text(texts.NOT_AN_INVOICE)
