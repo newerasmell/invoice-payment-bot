@@ -51,9 +51,25 @@ def test_reference_without_leading_zeros() -> None:
     assert (r.confidence, r.invoice.id) == (MatchConfidence.HIGH, 2)
 
 
-def test_reference_amount_differs_is_medium() -> None:
+def test_reference_with_smaller_amount_is_partial() -> None:
     r = m("1000.00", ref="0000000041 partial")
+    assert (r.confidence, r.invoice.id, r.method) == (MatchConfidence.HIGH, 1, "reference, partial")
+
+
+def test_reference_with_more_than_due_asks() -> None:
+    r = m("1300.00", ref="0000000041")
     assert (r.confidence, r.invoice.id) == (MatchConfidence.MEDIUM, 1)
+
+
+def test_amounts_compare_with_remainder() -> None:
+    part = cand(4, "0000000044", "1000.00", "Instalment Ltd")
+    part.invoice.amount_paid = Decimal("600.00")
+    pool = [part, B]
+    r = m("400.00", ref="0000000044", pool=pool)  # the last instalment
+    assert (r.confidence, r.method) == (MatchConfidence.HIGH, "reference+amount")
+    r = m("400.00", payer="Instalment Ltd", pool=pool)  # remainder + payer, no reference
+    assert (r.confidence, r.invoice.id) == (MatchConfidence.HIGH, 4)
+    assert m("1000.00", payer="Instalment Ltd", pool=pool).invoice is None  # not the full total
 
 
 def test_amount_and_payer_is_high() -> None:

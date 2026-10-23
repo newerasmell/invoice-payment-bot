@@ -82,12 +82,18 @@ async def _resolve_company(session: AsyncSession, t: Transfer) -> Company | None
     return None
 
 
-async def upsert_transfer(session: AsyncSession, provider: str, t: Transfer) -> BankTransfer:
-    bt = await session.scalar(
+async def find_transfer(
+    session: AsyncSession, provider: str, external_id: str
+) -> BankTransfer | None:
+    return await session.scalar(
         select(BankTransfer).where(
-            BankTransfer.provider == provider, BankTransfer.external_id == t.external_id
+            BankTransfer.provider == provider, BankTransfer.external_id == external_id
         )
     )
+
+
+async def upsert_transfer(session: AsyncSession, provider: str, t: Transfer) -> BankTransfer:
+    bt = await find_transfer(session, provider, t.external_id)
     company = await _resolve_company(session, t)
     if bt is None:
         bt = BankTransfer(provider=provider, external_id=t.external_id)
@@ -121,19 +127,66 @@ async def open_candidates(session: AsyncSession, company_id: int) -> list[Candid
 async def mark_paid(
     session: AsyncSession, invoice: Invoice, bt: BankTransfer, actor: str, method: str
 ) -> None:
-    invoice.status = InvoiceStatus.PAID
+    """Apply the transfer to the invoice: PAID once the payments reach the total, otherwise it
+    stays open with the remainder due (partial payment). Overpayments are kept as negative
+    remainders."""
+    invoice.amount_paid = invoice.paid + bt.amount
     invoice.related_transfer_id = bt.id
+    full = invoice.amount_paid >= invoice.amount_gross
+    if full:
+        invoice.status = InvoiceStatus.PAID
     audit(
         session,
         actor,
-        "invoice.paid",
+        "invoice.paid" if full else "invoice.partially_paid",
         f"invoice:{invoice.id}",
         {
             "number": invoice.number,
             "transfer": bt.external_id,
             "amount": str(bt.amount),
+            "paid": str(invoice.amount_paid),
+            "remaining": str(invoice.amount_gross - invoice.amount_paid),
             "method": method,
         },
+    )
+
+
+class LinkError(Exception):
+    """A user-facing reason why a payment can't be tied to an invoice."""
+
+
+async def link_transfer(
+    session: AsyncSession, bt: BankTransfer, invoice: Invoice, actor: str
+) -> None:
+    """A human ties an incoming payment to an invoice (admin suggestion or history)."""
+    if bt.direction != TransferDirection.INCOMING or bt.status != "processed":
+        raise LinkError("Only received payments can be tied to an invoice")
+    if invoice.status not in _OPEN or invoice.kind != "invoice":
+        raise LinkError(f"Invoice {invoice.number} is not open")
+    if invoice.currency != bt.currency or invoice.issuer_id != bt.company_id:
+        raise LinkError("The payment and the invoice belong to different accounts or currencies")
+    match = await session.scalar(select(PaymentMatch).where(PaymentMatch.transfer_id == bt.id))
+    if match is not None and (match.invoice_id is not None or match.method == "dismissed"):
+        raise LinkError("This payment is already resolved")
+    if match is None:
+        match = PaymentMatch(transfer_id=bt.id, confidence=MatchConfidence.LOW, method="manual")
+        session.add(match)
+    match.invoice_id = invoice.id
+    await mark_paid(session, invoice, bt, actor, f"linked by hand ({match.method})")
+
+
+async def close_remainder(session: AsyncSession, invoice: Invoice, actor: str) -> None:
+    """Mark an invoice paid although a small remainder is left (e.g. bank charges)."""
+    if invoice.status not in _OPEN or not invoice.paid:
+        raise LinkError(f"Invoice {invoice.number} has no partial payment to close")
+    left = invoice.remaining
+    invoice.status = InvoiceStatus.PAID
+    audit(
+        session,
+        actor,
+        "invoice.remainder_closed",
+        f"invoice:{invoice.id}",
+        {"number": invoice.number, "written_off": str(left), "currency": invoice.currency},
     )
 
 

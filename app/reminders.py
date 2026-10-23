@@ -141,6 +141,43 @@ async def run_once(settings: Settings, db: Database, bot: Bot | None) -> list[Re
     return reminders
 
 
+async def maybe_weekly_digest(
+    settings: Settings, db: Database, bot: Bot | None, now: datetime | None = None
+) -> bool:
+    """Send the weekly summary once per ISO week, at/after the configured local day and hour."""
+    from zoneinfo import ZoneInfo
+
+    from sqlalchemy import func
+
+    from app.audit import audit
+    from app.bot.report_flow import send_weekly_digest
+    from app.db.models import AuditLog
+
+    if bot is None or not settings.weekly_digest_enabled:
+        return False
+    try:
+        tz = ZoneInfo(settings.timezone)
+    except Exception:  # no tz database on the host: fall back to UTC
+        tz = UTC
+    local = (now or datetime.now(UTC)).astimezone(tz)
+    if local.weekday() != settings.digest_weekday or local.hour < settings.digest_hour:
+        return False
+    week = f"{local.isocalendar().year}-W{local.isocalendar().week:02d}"
+    async with db.session() as s:
+        done = await s.scalar(
+            select(func.count(AuditLog.id)).where(
+                AuditLog.action == "digest.sent", AuditLog.entity == week
+            )
+        )
+        if done:
+            return False
+        audit(s, "system", "digest.sent", week)  # claim the week first: never send twice
+        await s.commit()
+    sent = await send_weekly_digest(bot, db, settings, local.date())
+    log.info("weekly digest %s: %d message(s)", week, sent)
+    return True
+
+
 async def remind_forever(settings: Settings, db: Database, bot: Bot | None) -> None:
     await asyncio.sleep(30)  # let the app finish starting
     while True:
@@ -148,6 +185,7 @@ async def remind_forever(settings: Settings, db: Database, bot: Bot | None) -> N
             sent = await run_once(settings, db, bot)
             if sent:
                 log.info("reminders: %d sent", len(sent))
+            await maybe_weekly_digest(settings, db, bot)
         except asyncio.CancelledError:
             raise
         except Exception:

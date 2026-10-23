@@ -306,12 +306,31 @@ class Invoice(Timestamped, Base):
     # "invoice" or "credit_note" (same number series, negative amounts, credits another invoice)
     kind: Mapped[str] = mapped_column(String(16), default="invoice", server_default="invoice")
     credited_invoice_id: Mapped[int | None] = mapped_column(Integer)  # plain int: no table rebuild
+    # Sum of payments applied so far (partial payments); PAID once it reaches amount_gross.
+    amount_paid: Mapped[Decimal | None] = mapped_column(Money)
 
     __table_args__ = (UniqueConstraint("issuer_id", "number"),)
 
     lines: Mapped[list["InvoiceLine"]] = relationship(
         back_populates="invoice", order_by="InvoiceLine.position", cascade="all, delete-orphan"
     )
+
+    @property
+    def paid(self) -> Decimal:
+        if self.amount_paid is None:
+            return self.amount_gross if self.status == InvoiceStatus.PAID else Decimal("0.00")
+        return self.amount_paid
+
+    @property
+    def remaining(self) -> Decimal:
+        """What the client still owes (negative = overpaid)."""
+        if self.status in (InvoiceStatus.DRAFT, InvoiceStatus.CANCELLED):
+            return Decimal("0.00")
+        return self.amount_gross - self.paid
+
+    @property
+    def partially_paid(self) -> bool:
+        return self.status != InvoiceStatus.PAID and self.paid > 0
 
 
 class InvoiceDelivery(Base):

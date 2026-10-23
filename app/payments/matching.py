@@ -3,6 +3,9 @@
 Order (CLAUDE.md, Flow B): invoice number in the payment reason -> exact amount + payer IBAN or
 name -> exact amount among the issuer's open invoices -> ambiguous. Only HIGH is applied
 automatically; MEDIUM/LOW go to a human in Telegram.
+
+Amounts are compared with what is still due (`Invoice.remaining`), so instalments work: the
+invoice number in the reason plus an amount up to the remainder is a (partial) payment.
 """
 
 import re
@@ -83,11 +86,14 @@ def match_transfer(
     ]
     if len(by_number) == 1:
         c = by_number[0]
-        if c.invoice.amount_gross == amount:
+        due = c.invoice.remaining
+        if amount == due:
             return MatchResult(MatchConfidence.HIGH, c.invoice, "reference+amount", [c])
-        return MatchResult(MatchConfidence.MEDIUM, c.invoice, "reference, amount differs", [c])
+        if 0 < amount < due:
+            return MatchResult(MatchConfidence.HIGH, c.invoice, "reference, partial", [c])
+        return MatchResult(MatchConfidence.MEDIUM, c.invoice, "reference, more than due", [c])
 
-    same_amount = [c for c in pool if c.invoice.amount_gross == amount]
+    same_amount = [c for c in pool if c.invoice.remaining == amount]
     by_payer = [c for c in same_amount if payer_matches(c.client, payer_name, payer_account)]
     if len(by_payer) == 1:
         return MatchResult(MatchConfidence.HIGH, by_payer[0].invoice, "amount+payer", by_payer)
@@ -99,5 +105,5 @@ def match_transfer(
         cands = by_number or by_payer or same_amount
         return MatchResult(MatchConfidence.LOW, None, "ambiguous", cands[:5])
 
-    nearest = sorted(pool, key=lambda c: abs(c.invoice.amount_gross - amount))[:5]
+    nearest = sorted(pool, key=lambda c: abs(c.invoice.remaining - amount))[:5]
     return MatchResult(MatchConfidence.LOW, None, "no match", nearest)

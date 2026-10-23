@@ -27,6 +27,7 @@ HELP = (
     "/rules - automatic invoicing rules\n"
     "/companies - company profiles\n"
     "/balance &lt;company&gt; - account balance\n"
+    "/report [last|30|year|YYYY-MM] - money in/out, owed, to pay\n"
     "/requests - client invoice requests waiting\n"
     "/credit &lt;number&gt; [reason] - credit note for an issued invoice\n"
     "/cancel - stop the current edit or question\n"
@@ -214,6 +215,7 @@ def invoice_list(items) -> str:  # noqa: ANN001
         rows.append(
             f"{escape(num)} · {escape(issuer_code)} → {escape(client_name)} · "
             f"{fmt_money(inv.amount_gross, inv.currency)} · {inv.status.value}"
+            + (f" · {fmt_money(inv.remaining, inv.currency)} due" if inv.partially_paid else "")
         )
     return "\n".join(rows)
 
@@ -239,9 +241,23 @@ def payment_paid(bt, company, inv) -> str:  # noqa: ANN001
         f"💰 <b>Received {fmt_money(bt.amount, bt.currency)}</b> from {_payer(bt)}\n"
         f"for invoice <b>{escape(inv.number)}</b>"
         + (f" ({escape(company.code)})" if company else "")
-        + " — marked <b>PAID</b>."
+        + paid_state(inv)
         + (f"\nReason: {escape(bt.reference)}" if bt.reference else "")
     )
+
+
+def paid_state(inv) -> str:  # noqa: ANN001
+    if inv.status.value != "PAID":
+        return (
+            f" — <b>partial payment</b>: paid {fmt_money(inv.paid, inv.currency)} of "
+            f"{fmt_money(inv.amount_gross, inv.currency)}, "
+            f"<b>{fmt_money(inv.remaining, inv.currency)} still due</b>."
+        )
+    if inv.remaining < 0:
+        return (
+            f" — marked <b>PAID</b>, <b>overpaid by {fmt_money(-inv.remaining, inv.currency)}</b>."
+        )
+    return " — marked <b>PAID</b>."
 
 
 def payment_review(bt, company, method: str, suggested) -> str:  # noqa: ANN001
@@ -254,12 +270,19 @@ def payment_review(bt, company, method: str, suggested) -> str:  # noqa: ANN001
     if suggested is not None:
         lines.append(
             f"Possible match: invoice <b>{escape(suggested.number)}</b> "
-            f"({fmt_money(suggested.amount_gross, suggested.currency)}) — {escape(method)}."
+            f"({_due_text(suggested)}) — {escape(method)}."
         )
     else:
         lines.append(f"No certain match ({escape(method)}).")
     lines.append("Which invoice does it pay?")
     return "\n".join(lines)
+
+
+def _due_text(inv) -> str:  # noqa: ANN001
+    total = fmt_money(inv.amount_gross, inv.currency)
+    if inv.paid:
+        return f"{total}, {fmt_money(inv.remaining, inv.currency)} still due"
+    return total
 
 
 def payment_confirmed(number: str, user_name: str) -> str:
@@ -533,3 +556,56 @@ def request_card(req, company, client, total) -> str:  # noqa: ANN001
     if req.contact:
         lines.append(f"Contact: {escape(req.contact)}")
     return "\n".join(lines)
+
+
+# --- /report ----------------------------------------------------------------------------
+
+REPORT_USAGE = (
+    "Usage: /report [last | 30 | year | YYYY-MM]\n"
+    "No argument = this month. The full picture is in the admin panel → Finance."
+)
+
+
+def report(title: str, period, totals, receivables, open_summary, payables, tips, link) -> str:  # noqa: ANN001, PLR0913
+    out = [f"📊 <b>{escape(title)}</b> · {escape(period.label)}"]
+    currencies = sorted(set(totals) | set(receivables) | set(open_summary.by_bucket))
+    if not currencies and not payables:
+        out.append("No transfers or invoices.")
+    for cur in currencies:
+        out.append("")
+        if cur in totals:
+            t = totals[cur]
+            out.append(
+                f"💶 <b>{cur}</b> in {t.incoming:,.2f} · out {t.outgoing:,.2f} · "
+                f"net <b>{t.net:,.2f}</b>"
+            )
+        if cur in receivables:
+            r = receivables[cur]
+            out.append(
+                f"🧾 Invoiced {r.issued + r.credited:,.2f} ({r.count}) · paid {r.paid:,.2f} · "
+                f"still due {r.outstanding:,.2f}"
+            )
+        if cur in open_summary.by_bucket:
+            b = open_summary.by_bucket[cur]
+            owed = sum(b.values())
+            late = owed - b["Not due"]
+            out.append(
+                f"📥 Owed to us now <b>{owed:,.2f}</b>"
+                + (f", of which <b>{late:,.2f} late</b>" if late else "")
+            )
+    if open_summary.partial:
+        out.append(f"\n{open_summary.partial} invoice(s) partly paid.")
+    if payables:
+        total: dict[str, Decimal] = {}
+        for i, _ in payables:
+            total[i.currency] = total.get(i.currency, Decimal(0)) + i.amount
+        out.append(
+            "📤 We still have to pay: "
+            + ", ".join(f"{v:,.2f} {k}" for k, v in sorted(total.items()))
+            + f" ({len(payables)} instruction(s), /instructions)"
+        )
+    if tips.count:
+        out.append(f"💡 {tips.count} suggestion(s) waiting in Finance.")
+    if link:
+        out.append(f"\n{escape(link)}")
+    return "\n".join(out)

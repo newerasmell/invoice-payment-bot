@@ -14,7 +14,7 @@
       <td class="mono">{{ inv.number or "draft #%d" % inv.id }}{% if inv.kind == "credit_note" %} <span class="badge grey">credit note</span>{% endif %}</td>
       <td><span class="badge">{{ code }}</span> → {{ client }}</td>
       <td style="text-align:right;white-space:nowrap">{{ "{:,.2f}".format(inv.amount_gross) }} {{ inv.currency }}</td>
-      <td><span class="badge {{ 'ok' if inv.status.value in ('SENT', 'PAID') else ('grey' if inv.status.value == 'CANCELLED' else '') }}">{{ inv.status.value }}</span></td>
+      <td><span class="badge {{ 'ok' if inv.status.value in ('SENT', 'PAID') else ('grey' if inv.status.value == 'CANCELLED' else '') }}">{{ inv.status.value }}</span>{% if inv.partially_paid %}<div class="small muted" style="white-space:nowrap">part paid · {{ "{:,.2f}".format(inv.remaining) }} due</div>{% elif inv.remaining < 0 %}<div class="small muted">overpaid {{ "{:,.2f}".format(-inv.remaining) }}</div>{% endif %}</td>
       <td class="small muted">{% if inv.issue_date %}{{ inv.issue_date.strftime("%d.%m.%Y") }}{% endif %}{% if inv.due_date %} → {{ inv.due_date.strftime("%d.%m.%Y") }}{% endif %}</td>
       <td class="actions" style="justify-content:flex-end">
         <a class="btn secondary small" href="/admin/invoices/{{ inv.id }}/pdf" target="_blank">PDF</a>

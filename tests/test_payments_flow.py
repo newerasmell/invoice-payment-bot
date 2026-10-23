@@ -195,3 +195,36 @@ def test_webhook_refetches_and_processes(admin_settings_factory) -> None:  # noq
         bt = c.portal.call(stored)
         # The pushed amount was ignored; the re-fetched transfer is what got stored.
         assert bt.amount == Decimal("10.00") and bt.processed_at is not None
+
+
+async def test_instalments_then_overpayment(harness: BotHarness, db, settings) -> None:
+    inv = await _sent_invoice(db, settings, "1000")
+    calls = await harness.send_raw(f'/dev_simulate_incoming X 600 "Client Ltd" {inv.number} 1/2')
+    [msg] = [t for t in texts_of(calls) if "Received" in t]
+    assert "partial payment" in msg and "400.00 EUR still due" in msg
+    async with db.session() as s:
+        got = await s.get(Invoice, inv.id)
+        assert got.status == InvoiceStatus.APPROVED and got.amount_paid == Decimal("600.00")
+        assert got.partially_paid and got.remaining == Decimal("400.00")
+
+    # Second instalment without the number: remainder + payer name is enough.
+    calls = await harness.send_raw('/dev_simulate_incoming X 400 "Client Ltd" rest')
+    assert any("marked <b>PAID</b>" in t for t in texts_of(calls))
+    async with db.session() as s:
+        got = await s.get(Invoice, inv.id)
+        assert (got.status, got.amount_paid, got.remaining) == (
+            InvoiceStatus.PAID,
+            Decimal("1000.00"),
+            Decimal("0.00"),
+        )
+
+    # More than due with the number in the reason: a human decides; confirming records it.
+    other = await _sent_invoice(db, settings, "300")
+    calls = await harness.send_raw(f'/dev_simulate_incoming X 350 "Client Ltd" {other.number}')
+    [review] = [c for c in calls if isinstance(c, SendMessage) and "Which invoice" in c.text]
+    ok = review.reply_markup.inline_keyboard[0][0].callback_data
+    calls = await harness.click(ok)
+    assert any("overpaid by 50.00 EUR" in t for t in texts_of(calls))
+    async with db.session() as s:
+        got = await s.get(Invoice, other.id)
+        assert got.status == InvoiceStatus.PAID and got.remaining == Decimal("-50.00")

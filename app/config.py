@@ -75,6 +75,11 @@ class Settings(BaseSettings):
     reminder_check_seconds: int = 3600
     reminder_repeat_hours: int = 24
     instruction_timeout_hours: int = 48
+    # Weekly summary to approvers (Monday 08:00 local time by default).
+    weekly_digest_enabled: bool = True
+    digest_weekday: int = 0  # 0 = Monday
+    digest_hour: int = 8
+    timezone: str = "Europe/Sofia"
 
     default_currency: str = "EUR"
 

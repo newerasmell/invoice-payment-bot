@@ -301,6 +301,22 @@ Write pytest tests for: amount math (1.5% rounding), matching logic (HIGH/MEDIUM
   drafted automatically: `bot/requests_flow.py` notifies the company's users with
   Create draft / Decline (`to_draft` re-checks issuer and client completeness).
 
+## 10b11. Finance, partial payments, suggestions, /report (2026-10-23)
+- `Invoice.amount_paid` (nullable; migration backfills PAID = gross). `Invoice.paid`,
+  `.remaining`, `.partially_paid` are the only way to read it. "Partly paid" is derived: the
+  invoice stays APPROVED/SENT until `sync.mark_paid` brings the remainder to 0 (then PAID;
+  negative remainder = overpaid). Matching compares with `remaining`; invoice number in the
+  reason + amount below the remainder is a HIGH partial match, above it is MEDIUM.
+- `app/reports.py` (read-only figures) feeds Admin → Finance and `/report`; `app/suggestions.py`
+  proposes links (score ≥ 3: number in reason 3, amount = remainder 2, payer 2, within 2% 1),
+  2–3 payments adding up to a remainder, small remainders (≤ max(1.00, 0.5%)) and payables due
+  in 7 days. Actions are human clicks: `sync.link_transfer`, `sync.close_remainder` (audited).
+- `payments/history.load_history` (Finance → Load bank history, background task, ≤ 366 days)
+  stores old transfers marked processed without matching/rules/notifications; the polling
+  window is left to the poller.
+- Weekly digest: `reminders.maybe_weekly_digest` (once per ISO week, claimed via AuditLog
+  `digest.sent`) → `bot/report_flow.send_weekly_digest` to approvers.
+
 ## 10c. Deployment and migrations
 - Production is a single Render web service from `render.yaml` (Blueprint), SQLite on a
   persistent disk at `/var/data`, no staging. Every push to `main` deploys to production.

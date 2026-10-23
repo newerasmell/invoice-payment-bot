@@ -1,0 +1,192 @@
+{% extends "base.html" %}
+{% from "_macros.html" import csrf_input %}
+{% set section = "finance" %}
+{% block title %}Finance{% endblock %}
+{% macro money(v, cur="") %}<span class="num {{ 'neg' if v < 0 }}">{{ "{:,.2f}".format(v) }}</span>{% if cur %} <span class="cur">{{ cur }}</span>{% endif %}{% endmacro %}
+{% block content %}
+<h1>Finance</h1>
+<p class="sub">Money in and out, what each payment was for, what clients still owe and what we still have to pay. Read-only: nothing here moves money.</p>
+
+<div class="panel">
+  <form method="get" class="fin-filters">
+    <div class="presets">
+      {% for key, label in presets.items() %}<a class="btn small {{ '' if preset == key else 'secondary' }}" href="?preset={{ key }}{% if company_id %}&company={{ company_id }}{% endif %}{% if currency %}&currency={{ currency }}{% endif %}">{{ label }}</a>{% endfor %}
+    </div>
+    <div class="field"><label>From</label><input type="date" name="from" value="{{ period.start.isoformat() }}"></div>
+    <div class="field"><label>To</label><input type="date" name="to" value="{{ period.end.isoformat() }}"></div>
+    <div class="field"><label>Company</label>
+      <select name="company"><option value="">All companies</option>{% for c in companies %}<option value="{{ c.id }}" {{ 'selected' if company_id == c.id }}>{{ c.code }} – {{ c.name }}</option>{% endfor %}</select></div>
+    <div class="field"><label>Currency</label>
+      <select name="currency"><option value="">All</option>{% for c in currencies %}<option {{ 'selected' if currency == c }}>{{ c }}</option>{% endfor %}</select></div>
+    <div class="field"><label>&nbsp;</label><button class="btn small" type="submit">Show</button></div>
+  </form>
+</div>
+
+
+{% if tips.count or tips.unmatched_without_idea %}
+<div class="panel tips">
+  <div class="panel-head"><h2>Suggestions</h2><span class="muted small">nothing changes until you click</span></div>
+  {% for t in tips.links %}
+  <div class="tip">
+    <div><b>{{ "{:,.2f}".format(t.transfer.amount) }} {{ t.transfer.currency }}</b> from {{ t.transfer.payer_name or "?" }} ({{ t.transfer.booked_at.strftime("%d.%m.%Y") if t.transfer.booked_at else "" }}{% if t.transfer.reference %}, “{{ t.transfer.reference }}”{% endif %})
+      looks like a payment of invoice <b>{{ t.invoice.number }}</b> ({{ t.client.name }}, {{ "{:,.2f}".format(t.invoice.remaining) }} still due).
+      <div class="small muted">{{ t.reasons | join(" · ") }}</div></div>
+    <form method="post" action="/admin/finance/link" onsubmit="return confirm('Record this payment against invoice {{ t.invoice.number }}?')">
+      {{ csrf_input(csrf) }}<input type="hidden" name="transfer" value="{{ t.transfer.id }}"><input type="hidden" name="invoice" value="{{ t.invoice.id }}"><input type="hidden" name="back" value="{{ back }}">
+      <button class="btn small" type="submit">Link</button></form>
+  </div>
+  {% endfor %}
+  {% for sp in tips.splits %}
+  <div class="tip">
+    <div>{{ sp.transfers | length }} payments from {{ sp.transfers[0].payer_name }} ({% for t in sp.transfers %}{{ "{:,.2f}".format(t.amount) }}{% if not loop.last %} + {% endif %}{% endfor %}) add up to what invoice <b>{{ sp.invoice.number }}</b> still owes ({{ "{:,.2f}".format(sp.invoice.remaining) }} {{ sp.invoice.currency }}).</div>
+    <form method="post" action="/admin/finance/link" onsubmit="return confirm('Record these payments against invoice {{ sp.invoice.number }}?')">
+      {{ csrf_input(csrf) }}{% for t in sp.transfers %}<input type="hidden" name="transfer" value="{{ t.id }}">{% endfor %}<input type="hidden" name="invoice" value="{{ sp.invoice.id }}"><input type="hidden" name="back" value="{{ back }}">
+      <button class="btn small" type="submit">Link all</button></form>
+  </div>
+  {% endfor %}
+  {% for inv, client in tips.small_remainders %}
+  <div class="tip">
+    <div>Invoice <b>{{ inv.number }}</b> ({{ client.name }}) is open only for <b>{{ "{:,.2f}".format(inv.remaining) }} {{ inv.currency }}</b>, probably bank charges.</div>
+    <form method="post" action="/admin/finance/close-remainder" onsubmit="return confirm('Mark invoice {{ inv.number }} as paid and write off {{ "{:,.2f}".format(inv.remaining) }}?')">
+      {{ csrf_input(csrf) }}<input type="hidden" name="invoice" value="{{ inv.id }}">
+      <button class="btn secondary small" type="submit">Close as paid</button></form>
+  </div>
+  {% endfor %}
+  {% for i, code in tips.payables_due %}
+  <div class="tip">
+    <div>{% if i.due_date < today %}<span class="badge late">late</span>{% else %}<span class="badge warn">due {{ i.due_date.strftime("%d.%m") }}</span>{% endif %}
+      <b>{{ code }}</b> has to pay {{ i.to_name }} <b>{{ "{:,.2f}".format(i.amount) }} {{ i.currency }}</b> ({{ i.reference }}) — {{ "approved, make the transfer in Paynetics" if i.status.value == "AWAITING_BANK" else "still waiting for approval in Telegram" }}.</div>
+  </div>
+  {% endfor %}
+  {% if tips.unmatched_without_idea %}<p class="small muted" style="margin:8px 0 0">{{ tips.unmatched_without_idea }} received payment{{ 's' if tips.unmatched_without_idea != 1 }} without a likely invoice — see “Linked to: unmatched / waiting for a decision” below.</p>{% endif %}
+</div>
+{% endif %}
+
+{% if balances %}
+<h2 class="sec">Balances now</h2>
+<div class="kpis">
+  {% for b in balances %}
+  <div class="kpi">
+    <div class="kpi-label"><span class="badge">{{ b.code }}</span> <span class="mono small">{{ b.account.bank_account_ref }}</span></div>
+    {% if b.balance %}
+      <div class="kpi-value">{{ money(b.balance.balance) }} <span class="cur">{{ b.balance.currency }}</span></div>
+      {% if b.balance.available != b.balance.balance %}<div class="small muted">available {{ "{:,.2f}".format(b.balance.available) }}</div>{% endif %}
+    {% else %}<div class="small" style="color:var(--danger)">{{ b.error }}</div>{% endif %}
+  </div>
+  {% endfor %}
+</div>
+{% endif %}
+
+<h2 class="sec">{{ period.label }}</h2>
+<div class="kpis">
+  {% for cur, t in totals.items() %}
+  <div class="kpi"><div class="kpi-label">Received · {{ t.count_in }} payment{{ 's' if t.count_in != 1 }}</div><div class="kpi-value pos">{{ money(t.incoming) }} <span class="cur">{{ cur }}</span></div></div>
+  <div class="kpi"><div class="kpi-label">Paid out · {{ t.count_out }} transfer{{ 's' if t.count_out != 1 }}</div><div class="kpi-value">{{ money(-t.outgoing) }} <span class="cur">{{ cur }}</span></div></div>
+  <div class="kpi"><div class="kpi-label">Net</div><div class="kpi-value">{{ money(t.net) }} <span class="cur">{{ cur }}</span></div></div>
+  {% endfor %}
+  {% for cur, r in receivables.items() %}
+  <div class="kpi"><div class="kpi-label">Invoiced · {{ r.count }} invoice{{ 's' if r.count != 1 }}{% if r.credited %} (credit notes {{ "{:,.2f}".format(r.credited) }}){% endif %}</div><div class="kpi-value">{{ money(r.issued + r.credited) }} <span class="cur">{{ cur }}</span></div>
+    <div class="small muted">paid {{ "{:,.2f}".format(r.paid) }} · still due {{ "{:,.2f}".format(r.outstanding) }}</div></div>
+  {% endfor %}
+  {% if not totals and not receivables %}<div class="empty">No transfers or invoices in this period.</div>{% endif %}
+</div>
+
+<div class="panel">
+  <div class="panel-head"><h2>Owed to us now</h2><span class="muted small">all open invoices, any date{% if open.partial %} · {{ open.partial }} partly paid{% endif %}</span></div>
+  {% if open.rows %}
+  <div class="aging">
+    {% for cur, b in open.by_bucket.items() %}
+      {% for name in buckets %}
+      <div class="age {{ 'late' if loop.index > 1 and b[name] > 0 }}"><div class="kpi-label">{{ name }}</div><div class="kpi-value">{{ money(b[name]) }} <span class="cur">{{ cur }}</span></div></div>
+      {% endfor %}
+    {% endfor %}
+  </div>
+  <table class="list">
+    <thead><tr><th>No</th><th>Issuer → Client</th><th class="r">Total</th><th class="r">Paid</th><th class="r">Still due</th><th>Due date</th><th></th></tr></thead>
+    <tbody>
+    {% for o in open.rows %}
+    <tr>
+      <td class="mono"><a href="/admin/invoices/{{ o.invoice.id }}/pdf" target="_blank">{{ o.invoice.number }}</a></td>
+      <td><span class="badge">{{ o.company }}</span> → {{ o.client }}</td>
+      <td class="r">{{ money(o.invoice.amount_gross) }}</td>
+      <td class="r">{% if o.invoice.paid %}{{ money(o.invoice.paid) }}{% else %}<span class="muted">—</span>{% endif %}</td>
+      <td class="r"><b>{{ money(o.invoice.remaining, o.invoice.currency) }}</b></td>
+      <td class="small">{{ o.invoice.due_date.strftime("%d.%m.%Y") if o.invoice.due_date else "" }}</td>
+      <td>{% if o.days_late > 0 %}<span class="badge late">{{ o.days_late }} days late</span>{% elif o.invoice.partially_paid %}<span class="badge">part paid</span>{% endif %}</td>
+    </tr>
+    {% endfor %}
+    </tbody>
+  </table>
+  {% else %}<div class="empty">Nothing is owed to us right now.</div>{% endif %}
+  {% if open.overpaid %}
+  <p class="small" style="margin-top:12px"><b>Overpaid:</b> {% for o in open.overpaid %}{{ o.invoice.number }} ({{ o.client }}, {{ "{:,.2f}".format(-o.invoice.remaining) }} {{ o.invoice.currency }}){% if not loop.last %}, {% endif %}{% endfor %}</p>
+  {% endif %}
+</div>
+
+<div class="panel">
+  <div class="panel-head"><h2>We still have to pay</h2><span class="muted small">open payment instructions</span></div>
+  {% if payables %}
+  <table class="list">
+    <thead><tr><th>#</th><th>From → To</th><th class="r">Amount</th><th>Reference</th><th>Due</th><th>Status</th></tr></thead>
+    <tbody>
+    {% for i, code in payables %}
+    <tr><td class="mono">{{ i.id }}</td><td><span class="badge">{{ code }}</span> → {{ i.to_name }}</td><td class="r">{{ money(i.amount, i.currency) }}</td>
+      <td class="small mono">{{ i.reference }}</td><td class="small">{{ i.due_date.strftime("%d.%m.%Y") if i.due_date else "" }}</td>
+      <td><span class="badge">{{ "approved, waiting for the bank" if i.status.value == "AWAITING_BANK" else ("waiting for approval" if i.status.value == "PROPOSED" else i.status.value) }}</span></td></tr>
+    {% endfor %}
+    </tbody>
+  </table>
+  {% else %}<div class="empty">No open payment instructions.</div>{% endif %}
+</div>
+
+<div class="panel">
+  <div class="panel-head">
+    <h2>Transfers · {{ period.label }}</h2>
+    <a class="btn secondary small" href="/admin/finance/transfers.csv{{ '?' + csv_query if csv_query }}">Export CSV</a>
+  </div>
+  {% if rows %}
+  <table class="list">
+    <thead><tr><th>Date</th><th>Company</th><th>Counterparty</th><th>Reference</th><th class="r">Amount</th><th>Linked to</th></tr></thead>
+    <tbody>
+    {% for r in rows %}
+    <tr>
+      <td class="small" style="white-space:nowrap">{{ r.when.strftime("%d.%m.%Y") }}</td>
+      <td><span class="badge">{{ r.company }}</span></td>
+      <td>{{ r.counterparty }}</td>
+      <td class="small muted ref">{{ r.bt.reference or "" }}</td>
+      <td class="r" style="white-space:nowrap">{{ money(r.signed, r.bt.currency) }}</td>
+      <td>
+        {% if r.link == "invoice" %}<span class="badge ok">invoice {{ r.label }}</span>
+        {% elif r.link == "instruction" %}<span class="badge ok">payment {{ r.label }}</span>
+        {% elif r.link == "dismissed" %}<span class="badge grey">not an invoice</span>
+        {% elif r.link == "review" %}<span class="badge warn">waiting for a decision</span>
+        {% elif r.link == "pending" %}<span class="badge grey">{{ r.label }}</span>
+        {% else %}<span class="badge grey">unmatched</span>{% endif %}
+      </td>
+    </tr>
+    {% endfor %}
+    </tbody>
+  </table>
+  {% if row_count > rows | length %}<p class="small muted">Showing the latest {{ rows | length }} of {{ row_count }}; the CSV has all of them.</p>{% endif %}
+  {% else %}<div class="empty">No transfers in this period{% if not history.finished %}. Older transfers appear after loading the bank history below{% endif %}.</div>{% endif %}
+</div>
+
+<div class="panel">
+  <h2>Bank history</h2>
+  <p class="small muted" style="margin-top:0">The bot follows the last few days automatically. To see older periods, load the history from Paynetics (up to one year back). Older payments are only recorded: they don't trigger rules or notifications.</p>
+  {% if history.running %}
+    <div class="flash">Loading since {{ history.since.strftime("%d.%m.%Y") }}… {{ history.seen }} transfers so far. Refresh the page in a minute.</div>
+  {% else %}
+    {% if history.finished %}
+      {% if history.error %}<div class="alert">Loading failed: {{ history.error }}</div>
+      {% else %}<div class="flash">Loaded since {{ history.since.strftime("%d.%m.%Y") }}: {{ history.seen }} transfers, {{ history.added }} new.</div>{% endif %}
+    {% endif %}
+    <form method="post" action="/admin/finance/history" class="actions">
+      {{ csrf_input(csrf) }}
+      <label class="small" for="since">Load since</label>
+      <input type="date" id="since" name="since" value="{{ period.start.isoformat() }}" style="width:180px">
+      <button class="btn secondary small" type="submit">Load bank history</button>
+    </form>
+  {% endif %}
+</div>
+{% endblock %}

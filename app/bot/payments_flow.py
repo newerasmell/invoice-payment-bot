@@ -42,7 +42,7 @@ def review_kb(transfer_id: int, candidates: list) -> InlineKeyboardMarkup:  # no
         [
             InlineKeyboardButton(
                 text=f"✅ {c.invoice.number} · {c.client.name[:22]} · "
-                f"{c.invoice.amount_gross:,.2f}",
+                f"{c.invoice.remaining:,.2f}" + (" due" if c.invoice.paid else ""),
                 callback_data=Pay(action="ok", t=transfer_id, i=c.invoice.id).pack(),
             )
         ]
@@ -169,11 +169,11 @@ async def on_pay(
         match.invoice_id, match.confirmed_by_user = inv.id, allowed_user.telegram_id
         await psync.mark_paid(s, inv, bt, actor, f"confirmed ({match.method})")
         await s.commit()
-        number = inv.number or ""
-    await cb.answer("Marked as paid")
+        number, state = inv.number or "", texts.paid_state(inv)
+    await cb.answer("Payment recorded")
     await cb.message.edit_reply_markup(reply_markup=None)
     name = cb.from_user.first_name if cb.from_user else "you"
-    await cb.message.reply(texts.payment_confirmed(number, name))
+    await cb.message.reply(texts.payment_confirmed(number, name) + state)
 
 
 async def cmd_payments(

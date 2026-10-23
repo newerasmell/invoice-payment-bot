@@ -60,6 +60,21 @@ from code: transfers are executed by a human in the bank panel. See `CLAUDE.md` 
   and the lines, and sees the status of their requests (with the invoice PDF once issued) on
   the same page. Requests arrive in Telegram (also `/requests`) with **Create draft /
   Decline**; the draft is approved as usual. At most 5 open requests per client.
+- **Finance (done):** Admin → **Finance**: period (this/last month, 30 days, year, custom),
+  company and currency filters; live balances; received / paid out / net; invoiced, paid and
+  still due; what clients owe now with aging (not due, 1–30, 31–60, 60+ days late); open
+  payment instructions; every transfer with what it is tied to; CSV export. **Load bank
+  history** fetches up to a year of Paynetics transfers for reporting only (no rules or
+  notifications for old payments).
+- **Partial payments (done):** several payments can settle one invoice; matching compares
+  with what is still due; the invoice becomes PAID when the remainder reaches 0 (overpayments
+  are shown). Telegram says "partial payment, X still due".
+- **Suggestions (done):** on the Finance page, with one-click actions: a payment that is
+  probably for invoice N (and why), payments that add up to an invoice, invoices left open by
+  a few cents of bank charges, payments we have to make in the next 7 days.
+- **/report (done):** `/report [last|30|year|YYYY-MM]` summary in Telegram with a link to
+  Finance; a weekly summary goes to approvers on Mondays at 08:00 (`WEEKLY_DIGEST_ENABLED`,
+  `DIGEST_WEEKDAY`, `DIGEST_HOUR`, `TIMEZONE`).
 - **Credit notes (done):** `/credit <invoice number> [reason]` drafts a credit note for the full
   amount (negative lines, same parties as the invoice) with Approve / Reject. Approval gives it
   the next number in the issuer's series and cancels the invoice (a PAID one stays PAID; the

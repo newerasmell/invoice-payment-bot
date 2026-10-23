@@ -608,3 +608,18 @@ def test_team_add_edit_remove(client: TestClient, sync_db: Session) -> None:
         select(AuditLog.action).where(AuditLog.action.like("user.%")).order_by(AuditLog.id)
     ).all()
     assert actions[-3:] == ["user.added", "user.updated", "user.removed"]
+
+
+def test_finance_page_csv_and_history(client: TestClient) -> None:
+    for url in ("/admin/finance", "/admin/finance/transfers.csv"):
+        assert client.get(url).status_code == 303
+    token = login(client)
+    page = client.get("/admin/finance?preset=last_month")
+    assert page.status_code == 200 and "Owed to us now" in page.text
+    assert "Balances now" in page.text  # the seeded mock accounts
+    r = client.get("/admin/finance/transfers.csv?from=2026-10-01&to=2026-10-31")
+    assert r.status_code == 200 and r.content.decode("utf-8-sig").startswith("date,company")
+    assert "transfers-20261001-20261031.csv" in r.headers["content-disposition"]
+    r = post(client, "/admin/finance/history", {"since": "2026-01-01"}, token)
+    assert r.status_code == 303
+    assert "Bank history" in client.get("/admin/finance").text

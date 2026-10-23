@@ -968,6 +968,220 @@ async def team_delete(request: Request, user_id: int, session: DB) -> Response:
     return redirect("/admin/team", "Removed from the team", request)
 
 
+# --- finance ------------------------------------------------------------------------
+
+
+async def _balances(request: Request, session: DB, company_id: int | None) -> list[dict]:
+    bank = request.app.state.bank
+    q = (
+        select(CompanyBankAccount, Company.code)
+        .join(Company, Company.id == CompanyBankAccount.company_id)
+        .where(CompanyBankAccount.bank_account_ref.is_not(None))
+        .order_by(Company.code)
+    )
+    if company_id:
+        q = q.where(CompanyBankAccount.company_id == company_id)
+    rows = (await session.execute(q)).all()
+
+    async def one(acc: CompanyBankAccount, code: str) -> dict:
+        try:
+            bal = await asyncio.wait_for(bank.get_balance(acc.bank_account_ref), timeout=15)
+            return {"code": code, "account": acc, "balance": bal, "error": None}
+        except Exception as e:  # one failing account must not hide the others
+            return {"code": code, "account": acc, "balance": None, "error": str(e)[:200]}
+
+    return list(await asyncio.gather(*(one(a, c) for a, c in rows)))
+
+
+def _finance_filters(request: Request) -> tuple[Any, int | None, str | None, str]:
+    from datetime import date as _date
+
+    from app import reports
+
+    qp = request.query_params
+    preset = qp.get("preset") or ("custom" if qp.get("from") or qp.get("to") else "this_month")
+    period = reports.period_for(preset, qp.get("from"), qp.get("to"), _date.today())
+    company_id = int(qp["company"]) if (qp.get("company") or "").isdigit() else None
+    currency = (qp.get("currency") or "").upper()[:3] or None
+    return period, company_id, currency, preset
+
+
+@router.get("/finance")
+async def finance(request: Request, session: DB) -> Response:
+    from datetime import date as _date
+
+    from app import reports, suggestions
+
+    period, company_id, currency, preset = _finance_filters(request)
+    rows, totals = await reports.transfers(session, period, company_id, currency)
+    query = urlencode(
+        {
+            k: v
+            for k, v in {
+                "from": period.start.isoformat(),
+                "to": period.end.isoformat(),
+                "company": company_id or "",
+                "currency": currency or "",
+            }.items()
+            if v
+        }
+    )
+    return render(
+        request,
+        "finance.html",
+        period=period,
+        preset=preset,
+        presets=reports.PRESETS,
+        company_id=company_id,
+        currency=currency,
+        companies=await _companies(session),
+        currencies=sorted(
+            set((await session.scalars(select(CompanyBankAccount.currency).distinct())).all())
+        ),
+        balances=await _balances(request, session, company_id),
+        rows=rows[:500],
+        row_count=len(rows),
+        totals=totals,
+        receivables=await reports.receivables(session, period, company_id, currency),
+        open=await reports.open_invoices(session, _date.today(), company_id, currency),
+        buckets=reports.BUCKETS,
+        payables=await reports.payables(session, company_id, currency),
+        history=_history_state(request),
+        csv_query=query,
+        tips=await suggestions.build(session, _date.today(), company_id),
+        today=_date.today(),
+        back=str(request.url.path) + ("?" + str(request.url.query) if request.url.query else ""),
+    )
+
+
+@router.post("/finance/link")
+async def finance_link(request: Request, session: DB) -> Response:
+    from app.payments import sync as psync
+
+    form = await posted(request)
+    back = f.text(form, "back") or "/admin/finance"
+    if not back.startswith("/admin/finance"):
+        back = "/admin/finance"
+    invoice = await session.get(Invoice, int(f.text(form, "invoice") or 0))
+    ids = [int(x) for x in form.getlist("transfer") if isinstance(x, str) and x.isdigit()]
+    if invoice is None or not ids:
+        raise HTTPException(404)
+    try:
+        for tid in ids:
+            bt = await session.get(BankTransfer, tid)
+            if bt is None:
+                raise HTTPException(404)
+            await session.refresh(invoice)
+            await psync.link_transfer(session, bt, invoice, ACTOR)
+        await session.commit()
+    except psync.LinkError as e:
+        await session.rollback()
+        return redirect(back, f"Not linked: {e}", request)
+    state = "paid" if invoice.status.value == "PAID" else f"{invoice.remaining:,.2f} still due"
+    return redirect(back, f"Linked to invoice {invoice.number} ({state})", request)
+
+
+@router.post("/finance/close-remainder")
+async def finance_close_remainder(request: Request, session: DB) -> Response:
+    from app.payments import sync as psync
+
+    form = await posted(request)
+    invoice = await session.get(Invoice, int(f.text(form, "invoice") or 0))
+    if invoice is None:
+        raise HTTPException(404)
+    try:
+        await psync.close_remainder(session, invoice, ACTOR)
+        await session.commit()
+    except psync.LinkError as e:
+        return redirect("/admin/finance", str(e), request)
+    return redirect("/admin/finance", f"Invoice {invoice.number} closed as paid", request)
+
+
+@router.get("/finance/transfers.csv")
+async def finance_csv(request: Request, session: DB) -> Response:
+    import csv
+    import io
+
+    from app import reports
+
+    period, company_id, currency, _ = _finance_filters(request)
+    rows, _ = await reports.transfers(session, period, company_id, currency)
+    buf = io.StringIO()
+    w = csv.writer(buf)
+    w.writerow(
+        [
+            "date",
+            "company",
+            "direction",
+            "counterparty",
+            "account",
+            "reference",
+            "amount",
+            "currency",
+            "status",
+            "linked_to",
+            "bank_id",
+        ]
+    )
+    for r in reversed(rows):
+        incoming = r.bt.direction.value == "incoming"
+        w.writerow(
+            [
+                r.when.isoformat(),
+                r.company,
+                r.bt.direction.value,
+                _csv_cell(r.counterparty),
+                _csv_cell(r.bt.payer_account if incoming else r.bt.beneficiary_account),
+                _csv_cell(r.bt.reference),
+                f"{r.signed:.2f}",
+                r.bt.currency,
+                r.bt.status,
+                _csv_cell(f"{r.link} {r.label}".strip()),
+                _csv_cell(r.bt.external_id),
+            ]
+        )
+    name = f"transfers-{period.start:%Y%m%d}-{period.end:%Y%m%d}.csv"
+    return Response(
+        buf.getvalue().encode("utf-8-sig"),
+        media_type="text/csv; charset=utf-8",
+        headers={"Content-Disposition": f'attachment; filename="{name}"'},
+    )
+
+
+def _history_state(request: Request):  # noqa: ANN202
+    from app.payments.history import HistoryState
+
+    state = getattr(request.app.state, "history", None)
+    if state is None:
+        state = request.app.state.history = HistoryState()
+    return state
+
+
+@router.post("/finance/history")
+async def finance_history(request: Request, session: DB) -> Response:
+    from datetime import date as _date
+    from datetime import timedelta as _td
+
+    from app.payments.history import MAX_DAYS, load_history
+
+    form = await posted(request)
+    state = _history_state(request)
+    if state.running:
+        return redirect("/admin/finance", "Bank history is already loading", request)
+    try:
+        since = _date.fromisoformat(f.text(form, "since"))
+    except ValueError:
+        return redirect("/admin/finance", "Pick a start date", request)
+    since = max(since, _date.today() - _td(days=MAX_DAYS))
+    task = asyncio.create_task(
+        load_history(
+            request.app.state.db, request.app.state.bank, request.app.state.settings, since, state
+        )
+    )
+    request.app.state.history_task = task  # keep a reference so it isn't garbage-collected
+    return redirect("/admin/finance", f"Loading bank history since {since:%d.%m.%Y}…", request)
+
+
 # --- audit log ----------------------------------------------------------------------
 
 AUDIT_PAGE = 100

@@ -258,3 +258,37 @@ async def test_request_columns_on_existing_client(tmp_path: Path) -> None:
         ).fetchall()
         assert rows == [("Client 1", None, None), ("Client 2", None, None)]
         assert conn.execute("SELECT count(*) FROM invoice_requests").fetchone() == (0,)
+
+
+async def test_amount_paid_backfill(tmp_path: Path) -> None:
+    import asyncio
+
+    from alembic import command
+
+    from app.db.migrate import alembic_config
+
+    db = tmp_path / "m.db"
+    url = f"sqlite+aiosqlite:///{db}"
+    await asyncio.to_thread(command.upgrade, alembic_config(url), "21453fd3c1a2")
+    with sqlite3.connect(db) as conn:
+        conn.execute(
+            "INSERT INTO companies (id, code, name, invoice_prefix, invoice_next_number,"
+            " default_currency, default_vat_rate, default_payment_terms_days, created_at,"
+            " updated_at) VALUES (1, 'X', 'X', '', 1, 'EUR', 20, 14, '2026-10-20', '2026-10-20')"
+        )
+        conn.execute(
+            "INSERT INTO counterparties (id, name, archived, created_at, updated_at)"
+            " VALUES (1, 'Client Ltd', 0, '2026-10-20', '2026-10-20')"
+        )
+        for i, status in ((1, "PAID"), (2, "SENT")):
+            conn.execute(
+                "INSERT INTO invoices (id, number, issuer_id, counterparty_id, description,"
+                " amount_net, vat_rate, amount_vat, amount_gross, currency, status, source,"
+                " kind, created_at, updated_at) VALUES"
+                f" ({i}, '000000000{i}', 1, 1, '', 10000, 20, 2000, 12000, 'EUR', '{status}',"
+                " 'manual', 'invoice', '2026-10-20', '2026-10-20')"
+            )
+    await upgrade_to_head(url)
+    with sqlite3.connect(db) as conn:
+        rows = conn.execute("SELECT status, amount_paid FROM invoices ORDER BY id").fetchall()
+        assert rows == [("PAID", 12000), ("SENT", None)]
