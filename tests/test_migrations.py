@@ -233,3 +233,28 @@ async def test_credit_note_columns_on_existing_invoice(tmp_path: Path) -> None:
     with sqlite3.connect(db) as conn:
         row = conn.execute("SELECT number, kind, credited_invoice_id FROM invoices").fetchone()
         assert row == ("0000000006", "invoice", None)
+
+
+async def test_request_columns_on_existing_client(tmp_path: Path) -> None:
+    import asyncio
+
+    from alembic import command
+
+    from app.db.migrate import alembic_config
+
+    db = tmp_path / "m.db"
+    url = f"sqlite+aiosqlite:///{db}"
+    await asyncio.to_thread(command.upgrade, alembic_config(url), "2a5cc9737065")
+    with sqlite3.connect(db) as conn:
+        for i in (1, 2):  # two rows: the new unique index must accept many NULL tokens
+            conn.execute(
+                "INSERT INTO counterparties (id, name, archived, created_at, updated_at)"
+                f" VALUES ({i}, 'Client {i}', 0, '2026-10-20', '2026-10-20')"
+            )
+    await upgrade_to_head(url)
+    with sqlite3.connect(db) as conn:
+        rows = conn.execute(
+            "SELECT name, request_token, request_companies FROM counterparties"
+        ).fetchall()
+        assert rows == [("Client 1", None, None), ("Client 2", None, None)]
+        assert conn.execute("SELECT count(*) FROM invoice_requests").fetchone() == (0,)

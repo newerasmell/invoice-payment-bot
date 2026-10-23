@@ -1,0 +1,140 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="robots" content="noindex, nofollow">
+<meta name="referrer" content="no-referrer">
+<title>Invoice request · {{ client.name }}</title>
+<style>
+  :root { --ink:#101828; --muted:#667085; --line:#e4e7ec; --brand:#1f3a5f; --bg:#f5f6f8; --ok:#067647; --okbg:#ecfdf3; --err:#b42318; --errbg:#fef3f2; }
+  * { box-sizing: border-box; }
+  body { margin:0; background:var(--bg); color:var(--ink); font:15px/1.5 -apple-system, "Segoe UI", Inter, Roboto, sans-serif; }
+  main { max-width: 760px; margin: 0 auto; padding: 32px 16px 60px; }
+  h1 { font-size: 24px; margin: 0 0 4px; }
+  h2 { font-size: 17px; margin: 0 0 12px; }
+  .sub { color: var(--muted); margin: 0 0 24px; }
+  .panel { background:#fff; border:1px solid var(--line); border-radius:10px; padding:20px; margin-bottom:20px; }
+  label { display:block; font-weight:600; font-size:13px; margin-bottom:6px; }
+  input, select, textarea { width:100%; font:inherit; padding:9px 11px; border:1px solid #d0d5dd; border-radius:6px; background:#fff; color:inherit; }
+  textarea { min-height: 80px; resize: vertical; }
+  .grid { display:grid; grid-template-columns: 1fr 1fr; gap: 14px; }
+  .field { margin-bottom: 14px; }
+  .lines { width:100%; border-collapse: collapse; }
+  .lines th { text-align:left; font-size:12px; color:var(--muted); font-weight:600; padding: 0 6px 6px 0; }
+  .lines td { padding: 0 6px 8px 0; vertical-align: top; }
+  .lines td.num { width: 110px; } .lines td.sum { width: 110px; text-align:right; padding-top: 10px; color: var(--muted); }
+  .total { text-align:right; font-weight:700; margin-top: 6px; }
+  .btn { display:inline-block; border:1px solid var(--brand); background:var(--brand); color:#fff; border-radius:6px; padding:10px 18px; font:inherit; font-weight:600; cursor:pointer; text-decoration:none; }
+  .btn.secondary { background:#fff; color:var(--brand); }
+  .flash { background:var(--okbg); color:var(--ok); border:1px solid #abefc6; padding:12px 14px; border-radius:6px; margin-bottom:20px; }
+  .alert { background:var(--errbg); color:var(--err); border:1px solid #fecdca; padding:12px 14px; border-radius:6px; margin-bottom:20px; }
+  .muted { color: var(--muted); } .small { font-size: 13px; }
+  .badge { display:inline-block; white-space:nowrap; font-size:12px; font-weight:600; padding:1px 8px; border-radius:999px; background:#eef2f6; }
+  .badge.ok { background: var(--okbg); color: var(--ok); } .badge.no { background: var(--errbg); color: var(--err); }
+  table.hist { width:100%; border-collapse: collapse; } table.hist td { padding: 9px 4px; border-top: 1px solid var(--line); vertical-align: top; }
+  @media (max-width: 600px) { .grid { grid-template-columns: 1fr; } .lines td.sum { display:none; } .lines td.num { width: 80px; } }
+</style>
+</head>
+<body>
+<main>
+  <h1>Request an invoice</h1>
+  <p class="sub">For <b>{{ client.name }}</b>. Your request is checked by our team; you will receive the invoice once it is approved.</p>
+  {% if sent %}<div class="flash">Thank you, your request was received. We will send the invoice after review.</div>{% endif %}
+  {% if errors %}<div class="alert">{% for e in errors.values() %}{{ e }}{% if not loop.last %}<br>{% endif %}{% endfor %}</div>{% endif %}
+
+  {% if not options %}
+  <div class="panel">Invoice requests are not available at the moment. Please contact us directly.</div>
+  {% else %}
+  <form method="post" class="panel" id="req">
+    <h2>Details</h2>
+    <div class="grid">
+      <div class="field"><label for="company_id">Invoice from</label>
+        <select name="company_id" id="company_id" required>
+          <option value="">Choose…</option>
+          {% for o in options %}<option value="{{ o.company.id }}" data-currencies="{{ o.currencies | join(',') }}" {{ 'selected' if values.company_id == o.company.id | string }}>{{ o.company.legal_name or o.company.name }}</option>{% endfor %}
+        </select>
+      </div>
+      <div class="field"><label for="currency">Currency</label>
+        <select name="currency" id="currency" required>
+          {% for c in all_currencies %}<option value="{{ c }}" {{ 'selected' if values.currency == c }}>{{ c }}</option>{% endfor %}
+        </select>
+      </div>
+    </div>
+    <h2 style="margin-top:6px">What should be invoiced</h2>
+    <table class="lines">
+      <thead><tr><th>Description</th><th>Qty</th><th>Unit price (excl. VAT)</th><th></th></tr></thead>
+      <tbody id="rows">
+      {% for i in range(row_count) %}
+        {% set li = rows[i] if i < rows | length else {} %}
+        <tr>
+          <td><input type="text" name="desc" maxlength="300" value="{{ li.description or '' }}" placeholder="e.g. Consulting services, October 2026"></td>
+          <td class="num"><input type="text" name="qty" inputmode="decimal" value="{{ li.quantity or '1' }}"></td>
+          <td class="num"><input type="text" name="price" inputmode="decimal" value="{{ li.unit_price or '' }}" placeholder="0.00"></td>
+          <td class="sum"></td>
+        </tr>
+      {% endfor %}
+      </tbody>
+    </table>
+    <button type="button" class="btn secondary" id="add" style="padding:6px 12px">+ Add line</button>
+    <div class="total">Total excl. VAT: <span id="total">0.00</span></div>
+    <div class="field" style="margin-top:14px"><label for="note">Note for us (optional)</label><textarea name="note" id="note" maxlength="2000" placeholder="Order or contract number, period, anything we should know">{{ values.note or '' }}</textarea></div>
+    <div class="field"><label for="contact">Your name and email (optional)</label><input type="text" name="contact" id="contact" maxlength="255" value="{{ values.contact or '' }}"></div>
+    <button class="btn" type="submit">Send request</button>
+  </form>
+  {% endif %}
+
+  {% if history %}
+  <div class="panel">
+    <h2>Your requests</h2>
+    <table class="hist">
+    {% for r, company, inv in history %}
+      <tr>
+        <td class="small muted" style="white-space:nowrap">{{ r.created_at.strftime("%d.%m.%Y") }}</td>
+        <td>{{ company.legal_name or company.name }}<div class="small muted">{{ r.lines | length }} line{{ 's' if r.lines | length != 1 }} · {{ "{:,.2f}".format(total(r.lines)) }} {{ r.currency }} excl. VAT</div></td>
+        <td style="text-align:right">
+          {% if inv and inv.public_token and inv.status.value in ('APPROVED', 'SENT', 'PAID') %}
+            <span class="badge ok">Invoice {{ inv.number }}</span><br><a class="small" href="/i/{{ inv.public_token }}" target="_blank" rel="noopener">Open PDF</a>
+          {% elif r.status.value == 'DECLINED' %}<span class="badge no">Declined</span>{% if r.decline_reason %}<div class="small muted">{{ r.decline_reason }}</div>{% endif %}
+          {% elif inv and inv.status.value == 'CANCELLED' %}<span class="badge no">Not issued</span>
+          {% else %}<span class="badge">In review</span>{% endif %}
+        </td>
+      </tr>
+    {% endfor %}
+    </table>
+  </div>
+  {% endif %}
+</main>
+<script>
+(() => {
+  const company = document.getElementById("company_id"), currency = document.getElementById("currency");
+  if (!company) return;
+  const syncCurrencies = () => {
+    const opt = company.selectedOptions[0], allowed = (opt && opt.dataset.currencies || "").split(",").filter(Boolean);
+    let first = null;
+    for (const o of currency.options) { const ok = !allowed.length || allowed.includes(o.value); o.hidden = !ok; o.disabled = !ok; if (ok && !first) first = o; }
+    if (currency.selectedOptions[0] && currency.selectedOptions[0].disabled && first) currency.value = first.value;
+  };
+  const num = v => parseFloat(String(v).replace(/\s/g, "").replace(",", ".")) || 0;
+  const recalc = () => {
+    let t = 0;
+    for (const tr of document.querySelectorAll("#rows tr")) {
+      const q = num(tr.querySelector("[name=qty]").value), p = num(tr.querySelector("[name=price]").value);
+      tr.querySelector(".sum").textContent = p ? (q * p).toFixed(2) : ""; t += q * p;
+    }
+    document.getElementById("total").textContent = t.toLocaleString("en-US", {minimumFractionDigits: 2, maximumFractionDigits: 2});
+  };
+  document.getElementById("add").addEventListener("click", () => {
+    const rows = document.getElementById("rows");
+    if (rows.children.length >= {{ max_lines }}) return;
+    const tr = rows.lastElementChild.cloneNode(true);
+    tr.querySelectorAll("input").forEach(i => { i.value = i.name === "qty" ? "1" : ""; });
+    rows.appendChild(tr); recalc();
+  });
+  company.addEventListener("change", syncCurrencies);
+  document.getElementById("rows").addEventListener("input", recalc);
+  syncCurrencies(); recalc();
+})();
+</script>
+</body>
+</html>

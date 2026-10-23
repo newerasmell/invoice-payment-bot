@@ -1,5 +1,6 @@
 """All user-facing bot strings live here."""
 
+from decimal import Decimal
 from html import escape
 
 from app.bank.base import Balance, Transfer
@@ -26,6 +27,7 @@ HELP = (
     "/rules - automatic invoicing rules\n"
     "/companies - company profiles\n"
     "/balance &lt;company&gt; - account balance\n"
+    "/requests - client invoice requests waiting\n"
     "/credit &lt;number&gt; [reason] - credit note for an issued invoice\n"
     "/cancel - stop the current edit or question\n"
     "/help - this message"
@@ -497,3 +499,37 @@ def reminder_instruction(i, payer, hours: int) -> str:  # noqa: ANN001
         f"show the transfer yet. Make it in the Paynetics panel of {escape(payer.code)}, "
         "or cancel the instruction if it is no longer needed."
     )
+
+
+# --- client invoice requests -------------------------------------------------------------
+
+BTN_REQUEST_DRAFT = "📄 Create draft"
+BTN_REQUEST_DECLINE = "✖ Decline"
+NO_REQUESTS = "No client invoice requests waiting."
+REQUEST_DECLINED = "Request declined. The client sees it as declined on their request page."
+REQUEST_DRAFT_HEADER = "📨 <b>From a client request</b>: check it, then approve."
+
+
+def request_card(req, company, client, total) -> str:  # noqa: ANN001
+    state = {
+        "NEW": "📨 <b>New invoice request</b>",
+        "DRAFTED": "📄 Invoice request → draft created",
+        "DECLINED": "✖ Invoice request declined",
+    }[req.status.value]
+    lines = [
+        f"{state} #{req.id}",
+        f"Client: <b>{escape(client.name)}</b>",
+        f"Invoice from: <b>{escape(company.code)}</b> "
+        f"({escape(company.legal_name or company.name)})",
+    ]
+    for li in req.lines[:10]:
+        lines.append(
+            f"• {escape(li['description'][:60])} — {escape(li['quantity'])} × "
+            f"{Decimal(li['unit_price']):,.2f}"
+        )
+    lines.append(f"Total excl. VAT: <b>{fmt_money(total, req.currency)}</b>")
+    if req.note:
+        lines.append(f"Note: {escape(req.note[:300])}")
+    if req.contact:
+        lines.append(f"Contact: {escape(req.contact)}")
+    return "\n".join(lines)

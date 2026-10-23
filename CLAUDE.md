@@ -293,6 +293,14 @@ Write pytest tests for: amount math (1.5% rounding), matching logic (HIGH/MEDIUM
 - Bot edit mode ends when its draft is approved/rejected, or on the next message if it is no
   longer a draft; `/cancel` and `/stop` always leave it.
 
+## 10b10. Client invoice requests (2026-10-22)
+- `Counterparty.request_token` (secret, rotatable) → public `/r/<token>` form (`app/public.py`,
+  `public_templates/request.html`; noindex, no-referrer). `invoices/requests.py` validates
+  (≤ 20 lines, positive numbers, only companies in `request_companies` or all with a bank
+  account in the currency, ≤ 5 NEW per client) and stores an `InvoiceRequest`. Nothing is
+  drafted automatically: `bot/requests_flow.py` notifies the company's users with
+  Create draft / Decline (`to_draft` re-checks issuer and client completeness).
+
 ## 10c. Deployment and migrations
 - Production is a single Render web service from `render.yaml` (Blueprint), SQLite on a
   persistent disk at `/var/data`, no staging. Every push to `main` deploys to production.

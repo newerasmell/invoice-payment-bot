@@ -35,6 +35,7 @@ from app.db.models import (
     Counterparty,
     FeeRuleType,
     Invoice,
+    InvoiceRequest,
     InvoiceTemplate,
     NotePreset,
     Rule,
@@ -798,7 +799,55 @@ async def client_edit(request: Request, client_id: int, session: DB) -> Response
         values={},
         errors={},
         companies=await _companies(session),
+        **await _request_ctx(request, session, client),
     )
+
+
+async def _request_ctx(request: Request, session: DB, client: Counterparty) -> dict[str, Any]:
+    from app.invoices import requests as reqs
+
+    settings: Settings = request.app.state.settings
+    base = (settings.public_base_url or str(request.base_url)).rstrip("/")
+    rows = (
+        await session.execute(
+            select(InvoiceRequest, Company.code)
+            .join(Company, Company.id == InvoiceRequest.company_id)
+            .where(InvoiceRequest.counterparty_id == client.id)
+            .order_by(InvoiceRequest.id.desc())
+            .limit(20)
+        )
+    ).all()
+    return {
+        "request_link": f"{base}/r/{client.request_token}" if client.request_token else None,
+        "requests": rows,
+        "req_total": reqs.total,
+    }
+
+
+@router.post("/clients/{client_id}/request-link")
+async def client_request_link(request: Request, client_id: int, session: DB) -> Response:
+    from app.invoices import requests as reqs
+
+    form = await posted(request)
+    client = await session.get(Counterparty, client_id)
+    if client is None:
+        raise HTTPException(404, "Client not found")
+    do = request.query_params.get("do")
+    if do in ("enable", "rotate"):
+        client.request_token, msg = reqs.new_token(), "Request link ready"
+    elif do == "disable":
+        client.request_token, msg = None, "Request link disabled"
+    elif do == "companies":
+        known = {c.code for c in await _companies(session)}
+        client.request_companies = sorted(
+            c for c in form.getlist("companies") if isinstance(c, str) and c in known
+        )
+        msg = "Saved"
+    else:
+        raise HTTPException(400)
+    audit(session, ACTOR, f"client.request_link.{do}", f"client:{client.id}")
+    await session.commit()
+    return redirect(f"/admin/clients/{client.id}", msg, request)
 
 
 @router.post("/clients/{client_id}")
@@ -818,6 +867,7 @@ async def client_update(request: Request, client_id: int, session: DB) -> Respon
             values=dict(form),
             errors=errors,
             companies=await _companies(session),
+            **await _request_ctx(request, session, client),
         )
     changed = {k: str(v) for k, v in data.items() if getattr(client, k) != v}
     for k, v in data.items():

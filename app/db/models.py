@@ -218,6 +218,36 @@ class Counterparty(Timestamped, Base):
     delivery_channels: Mapped[list[str] | None] = mapped_column(JSON)
     notes: Mapped[str | None] = mapped_column(Text)
     archived: Mapped[bool] = mapped_column(Boolean, default=False, server_default="0")
+    # Secret link for the public invoice-request form (/r/<token>); None = no form.
+    request_token: Mapped[str | None] = mapped_column(String(64), unique=True, index=True)
+    # Our company codes the client may ask to be invoiced by; empty/None = all.
+    request_companies: Mapped[list[str] | None] = mapped_column(JSON)
+
+
+class RequestStatus(StrEnum):
+    NEW = "NEW"
+    DRAFTED = "DRAFTED"
+    DECLINED = "DECLINED"
+
+
+class InvoiceRequest(Timestamped, Base):
+    """A client's request for an invoice from the public form. Only an internal user turns it
+    into a draft (which is then approved like any other)."""
+
+    __tablename__ = "invoice_requests"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    counterparty_id: Mapped[int] = mapped_column(Integer, index=True)
+    company_id: Mapped[int] = mapped_column(Integer)
+    currency: Mapped[str] = mapped_column(String(3))
+    lines: Mapped[list[dict[str, str]]] = mapped_column(JSON)
+    note: Mapped[str | None] = mapped_column(Text)
+    contact: Mapped[str | None] = mapped_column(String(255))
+    status: Mapped[RequestStatus] = mapped_column(_enum(RequestStatus), default=RequestStatus.NEW)
+    invoice_id: Mapped[int | None] = mapped_column(Integer)
+    decided_by: Mapped[int | None] = mapped_column(BigInteger)
+    decided_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    decline_reason: Mapped[str | None] = mapped_column(Text)
 
 
 class Contract(Timestamped, Base):

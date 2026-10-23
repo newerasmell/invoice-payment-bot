@@ -54,6 +54,12 @@ from code: transfers are executed by a human in the bank panel. See `CLAUDE.md` 
     at most every `REMINDER_REPEAT_HOURS`.
   - Admin → **Team**: who may use the bot (Telegram id, name, approver/operator, companies).
   - Admin → **Audit log**: filter by action/entity/actor/date, **Export CSV**.
+- **Client invoice requests (done):** Admin → client → **Invoice requests → Create request
+  link** gives a secret link (`/r/<token>`, new link / disable any time, optionally limited to
+  some of our companies). The client picks which of our companies invoices them, the currency
+  and the lines, and sees the status of their requests (with the invoice PDF once issued) on
+  the same page. Requests arrive in Telegram (also `/requests`) with **Create draft /
+  Decline**; the draft is approved as usual. At most 5 open requests per client.
 - **Credit notes (done):** `/credit <invoice number> [reason]` drafts a credit note for the full
   amount (negative lines, same parties as the invoice) with Approve / Reject. Approval gives it
   the next number in the issuer's series and cancels the invoice (a PAID one stays PAID; the

@@ -1,5 +1,5 @@
 {% extends "base.html" %}
-{% from "_macros.html" import field, csrf_input %}
+{% from "_macros.html" import field, csrf_input, post_button %}
 {% set section = "clients" %}
 {% set is_new = client.id is none %}
 {% macro v(name) %}{{ values[name] if name in values else (client[name] if client[name] is not none else "") }}{% endmacro %}
@@ -51,4 +51,48 @@
     <a class="btn secondary" href="/admin/clients">Cancel</a>
   </div>
 </form>
+{% if not is_new %}
+<div class="panel">
+  <h2>Invoice requests</h2>
+  <p class="muted small" style="margin-top:0">A secret link where this client can ask for an invoice (which of our companies, currency, lines). Requests arrive in Telegram; only your team turns them into drafts, and drafts are approved as usual. Anyone with the link can submit requests for this client, so share it only with them.</p>
+  {% if client.request_token %}
+    {% set link = request_link %}
+    <div class="actions" style="margin-bottom:14px">
+      <input type="text" readonly value="{{ link }}" class="mono" style="flex:1;min-width:260px" onclick="this.select()">
+      <button type="button" class="btn secondary small copy-link" data-url="{{ link }}">Copy</button>
+      <a class="btn secondary small" href="{{ link }}" target="_blank" rel="noopener">Open</a>
+      {{ post_button("/admin/clients/%d/request-link?do=rotate" % client.id, "New link", csrf, "btn secondary small", "The old link will stop working. Continue?") }}
+      {{ post_button("/admin/clients/%d/request-link?do=disable" % client.id, "Disable", csrf, "btn danger small", "Disable the request link?") }}
+    </div>
+    <form method="post" action="/admin/clients/{{ client.id }}/request-link?do=companies">
+      {{ csrf_input(csrf) }}
+      <label style="font-weight:600;font-size:13px">Companies the client may choose <span class="muted">(none ticked = all with a bank account)</span></label>
+      <div class="actions" style="margin:6px 0 10px">{% for c in companies %}<label class="check"><input type="checkbox" name="companies" value="{{ c.code }}" {{ 'checked' if c.code in (client.request_companies or []) }}> {{ c.code }}</label>{% endfor %}</div>
+      <button class="btn secondary small" type="submit">Save companies</button>
+    </form>
+  {% else %}
+    {{ post_button("/admin/clients/%d/request-link?do=enable" % client.id, "Create request link", csrf, "btn small") }}
+  {% endif %}
+  {% if requests %}
+  <table class="list" style="margin-top:16px">
+    <thead><tr><th>#</th><th>Date</th><th>From</th><th style="text-align:right">Total excl. VAT</th><th>Status</th></tr></thead>
+    <tbody>
+    {% for r, code in requests %}
+    <tr><td class="mono">{{ r.id }}</td><td class="small">{{ r.created_at.strftime("%d.%m.%Y %H:%M") }}</td><td><span class="badge">{{ code }}</span></td>
+      <td style="text-align:right">{{ "{:,.2f}".format(req_total(r.lines)) }} {{ r.currency }}</td>
+      <td><span class="badge {{ 'ok' if r.status.value == 'DRAFTED' else ('grey' if r.status.value == 'DECLINED') }}">{{ r.status.value }}</span>{% if r.invoice_id %} <span class="small muted">draft #{{ r.invoice_id }}</span>{% endif %}</td></tr>
+    {% endfor %}
+    </tbody>
+  </table>
+  {% endif %}
+</div>
+{% endif %}
+{% endblock %}
+{% block scripts %}
+<script>
+document.querySelectorAll(".copy-link").forEach(b => b.addEventListener("click", async () => {
+  try { await navigator.clipboard.writeText(b.dataset.url); b.textContent = "Copied"; }
+  catch { window.prompt("Copy the link:", b.dataset.url); }
+}));
+</script>
 {% endblock %}
