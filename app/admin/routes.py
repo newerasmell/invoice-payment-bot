@@ -1141,7 +1141,10 @@ async def company_bank_test(
                 f"company:{company.id}",
                 {"ok": True, "accounts": len(accounts)},
             )
-        except BankError as e:
+        except Exception as e:  # never a 500 page: show what went wrong
+            if not isinstance(e, BankError):
+                log.exception("bank test for %s failed", company.code)
+                e = BankError(f"Unexpected response from Paynetics ({type(e).__name__}: {e})")
             result["error"] = str(e)
             result["outbound_ip"] = await outbound_ip()
             audit(

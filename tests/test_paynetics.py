@@ -260,3 +260,24 @@ async def test_cloudflare_challenge_is_explained() -> None:
     with pytest.raises(BankError) as e:
         await c.profile()
     assert "<html>" not in str(e.value)
+
+
+@pytest.mark.parametrize(
+    "body",
+    [
+        {"data": {"account": {"accountNumber": "41411111111", "balance": "10.00"}}},
+        {"data": {"account": [{"accountNumber": "41411111111", "balance": "10.00"}]}},
+        {"data": {"accounts": [{"accountNumber": "41411111111", "balance": "10.00"}]}},
+        {"data": [{"accountNumber": "41411111111", "balance": "10.00"}]},
+        {"data": {"accountNumber": "41411111111", "balance": "10.00"}},
+        [{"accountNumber": "41411111111", "balance": "10.00"}, "junk", {"no": "number"}],
+    ],
+)
+def test_account_shapes(body) -> None:  # noqa: ANN001
+    [a] = pn._account_items(body)
+    assert a["accountNumber"] == "41411111111"
+
+
+def test_account_shapes_empty() -> None:
+    for body in (None, {}, {"data": None}, {"data": "x"}, {"data": {"account": []}}):
+        assert pn._account_items(body) == []

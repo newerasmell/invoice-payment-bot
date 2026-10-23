@@ -467,6 +467,14 @@ def test_bank_api_panel(client: TestClient, sync_db: Session, monkeypatch) -> No
     assert "Connected as <b>Company X Ltd</b>" in html and "203.0.113.7" in html
     assert "41499999999" in html and html.count('badge ok">yes') == 1
 
+    class BrokenClient(FakeClient):
+        async def accounts(self) -> list:
+            raise AttributeError("'list' object has no attribute 'get'")
+
+    monkeypatch.setattr(routes, "PayneticsClient", BrokenClient)
+    r = post(client, f"/admin/companies/{cid}/bank-test", {}, token)
+    assert r.status_code == 200 and "Unexpected response from Paynetics" in r.text
+
 
 def test_rules_admin(client: TestClient, sync_db: Session) -> None:
     from app.db.models import Contract, Counterparty, Rule

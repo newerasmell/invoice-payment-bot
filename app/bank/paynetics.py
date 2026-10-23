@@ -156,15 +156,13 @@ class PayneticsClient:
 
     async def profile(self) -> dict[str, Any]:
         body = await self._get("/profile")
-        return (body or {}).get("data") or {}
+        data = body.get("data") if isinstance(body, dict) else body
+        if isinstance(data, list):  # tolerate a list: take the first profile
+            data = next((d for d in data if isinstance(d, dict)), {})
+        return data if isinstance(data, dict) else {}
 
     async def accounts(self) -> list[Balance]:
-        body = await self._get("/accounts")
-        data = (body or {}).get("data") or {}
-        items = data.get("account") or data.get("accounts") or []
-        if isinstance(items, dict):
-            items = [items]
-        return [self._balance(a) for a in items if isinstance(a, dict)]
+        return [self._balance(a) for a in _account_items(await self._get("/accounts"))]
 
     async def balance(self, account: str) -> Balance | None:
         body = await self._get(f"/accounts/{account}")
@@ -177,6 +175,7 @@ class PayneticsClient:
 
     @staticmethod
     def _balance(a: dict[str, Any]) -> Balance:
+        # Amounts may come as "1,234.56" or numbers; to_money normalises both.
         bal = to_money(str(a.get("balance") or "0"))
         avail = a.get("availableBalance")
         return Balance(
@@ -291,3 +290,19 @@ class PayneticsProvider:
     async def aclose(self) -> None:
         for c in self.clients.values():
             await c.aclose()
+
+
+def _account_items(body: Any) -> list[dict[str, Any]]:  # noqa: ANN401
+    """Account objects from any of the shapes seen for "all accounts": the spec's
+    {"data": {"account": {...}}}, a list under data.account / data.accounts, or data itself
+    being a list."""
+    data = body.get("data", body) if isinstance(body, dict) else body
+    if isinstance(data, dict):
+        data = (
+            data.get("account") or data.get("accounts") or (data if "accountNumber" in data else [])
+        )
+    if isinstance(data, dict):
+        data = [data]
+    if not isinstance(data, list):
+        return []
+    return [a for a in data if isinstance(a, dict) and a.get("accountNumber")]
