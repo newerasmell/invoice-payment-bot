@@ -623,3 +623,25 @@ def test_finance_page_csv_and_history(client: TestClient) -> None:
     r = post(client, "/admin/finance/history", {"since": "2026-01-01"}, token)
     assert r.status_code == 303
     assert "Bank history" in client.get("/admin/finance").text
+
+
+def test_mailbox_panel_and_test(client: TestClient, sync_db: Session, monkeypatch) -> None:  # noqa: ANN001
+    from app.inbox import mail
+
+    token = login(client)
+    cid = company_id(sync_db, "X")
+    page = client.get(f"/admin/companies/{cid}").text
+    assert "IMAP_X_HOST" in page and "Not set up." in page
+    html = post(client, f"/admin/companies/{cid}/imap-test", {}, token).text
+    assert "No IMAP settings" in html
+    for k, v in {"HOST": "imap.example.test", "USER": "inv@x.test", "PASSWORD": "p"}.items():
+        monkeypatch.setenv(f"IMAP_X_{k}", v)
+    monkeypatch.setattr(mail, "check_login", lambda box: 12)
+    html = post(client, f"/admin/companies/{cid}/imap-test", {}, token).text
+    assert "Connected to <b>inv@x.test@imap.example.test/INBOX</b>: 12 messages" in html
+
+    def refuse(box):  # noqa: ANN001, ANN202
+        raise mail.MailError("Login or folder failed: bad credentials")
+
+    monkeypatch.setattr(mail, "check_login", refuse)
+    assert "bad credentials" in post(client, f"/admin/companies/{cid}/imap-test", {}, token).text

@@ -124,6 +124,27 @@
   {% endif %}
 </div>
 
+<div class="panel" id="mailbox">
+  <div class="panel-head">
+    <h2>Supplier invoices by email (IMAP)</h2>
+    <form method="post" action="/admin/companies/{{ company.id }}/imap-test">{{ csrf_input(csrf) }}<button class="btn secondary small" type="submit">Test mailbox</button></form>
+  </div>
+  <p class="muted small" style="margin-top:0">
+    Invoices this company has to pay, sent to its mailbox, show up in Telegram (read-only: nothing in the mailbox is changed or marked as read). Set
+    <code>IMAP_{{ company.code | env_code }}_HOST</code> (e.g. <code>imap.gmail.com</code>),
+    <code>IMAP_{{ company.code | env_code }}_USER</code> and
+    <code>IMAP_{{ company.code | env_code }}_PASSWORD</code> (for Gmail an <i>app password</i>), optionally
+    <code>_PORT</code> (993) and <code>_FOLDER</code> (INBOX), in Render → Environment.
+  </p>
+  {% set mb = mailbox_status(company.code) %}
+  {% if imap_test is defined %}
+    {% if imap_test.error %}<div class="alert">{{ imap_test.error }}</div>
+    {% else %}<div class="flash">Connected to <b>{{ imap_test.key }}</b>: {{ imap_test.count }} message{{ 's' if imap_test.count != 1 }} in the folder.</div>{% endif %}
+  {% elif not mb.configured %}<div class="empty">Not set up.</div>
+  {% elif mb.checked_at %}<p class="small">Last check {{ mb.checked_at.strftime("%d.%m.%Y %H:%M") }} UTC: {% if mb.error %}<span style="color:var(--danger)">{{ mb.error }}</span>{% else %}OK{% endif %}</p>
+  {% else %}<p class="small muted">Set up; the first check runs within a few minutes of a restart.</p>{% endif %}
+</div>
+
 <div class="panel" id="templates">
   <div class="panel-head">
     <h2>Invoice templates</h2>

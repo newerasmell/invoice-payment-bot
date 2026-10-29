@@ -317,6 +317,19 @@ Write pytest tests for: amount math (1.5% rounding), matching logic (HIGH/MEDIUM
 - Weekly digest: `reminders.maybe_weekly_digest` (once per ISO week, claimed via AuditLog
   `digest.sent`) → `bot/report_flow.send_weekly_digest` to approvers.
 
+## 10b12. Supplier invoices by email (Flow D, 2026-10-23)
+- Mailboxes come only from env: `IMAP_<CODE>_HOST/_USER/_PASSWORD[/_PORT/_FOLDER]`
+  (`Settings.imap_mailboxes()`); the mailbox belongs to that company (it is the payer).
+- `inbox/mail.py`: IMAP opened read-only (EXAMINE, `BODY.PEEK[]`), new UIDs after the last
+  stored one per UIDVALIDITY (first run: `IMAP_LOOKBACK_DAYS`), ≤ 50 per run, ≤ 25 MB per email;
+  attachments: PDF (must start with `%PDF`) or attached images ≥ 20 KB (inline/signature images
+  skipped), ≤ 10 MB, ≤ 5. SPF/DKIM/DMARC verdict only from the **topmost**
+  Authentication-Results header.
+- `inbox/service.py` stores each email once (`InboxMessage`, unique mailbox+uidvalidity+uid) and
+  `bot/inbox_flow.py` sends the notice. Claude reads the files only after "Read & prepare
+  payment"; the result is a PROPOSED instruction via `instructions.create_from_document`
+  (unverified email → IBAN warning in the note). Tests run against `tests/fake_imap.py`.
+
 ## 10c. Deployment and migrations
 - Production is a single Render web service from `render.yaml` (Blueprint), SQLite on a
   persistent disk at `/var/data`, no staging. Every push to `main` deploys to production.

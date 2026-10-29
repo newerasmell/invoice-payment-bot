@@ -29,6 +29,7 @@ HELP = (
     "/balance &lt;company&gt; - account balance\n"
     "/report [last|30|year|YYYY-MM] - money in/out, owed, to pay\n"
     "/requests - client invoice requests waiting\n"
+    "/inbox - supplier invoices received by email\n"
     "/credit &lt;number&gt; [reason] - credit note for an issued invoice\n"
     "/cancel - stop the current edit or question\n"
     "/help - this message"
@@ -101,6 +102,10 @@ READING = "Reading your request…"
 NOT_AN_INVOICE = (
     "I can prepare invoices from a message like:\n"
     "<i>Invoice Client Ltd 1200 EUR from Z for consulting services</i>\n\nSend /help for commands."
+)
+DEFAULT_LINE = "Services"
+NO_DESCRIPTION = (
+    'No description of the service was given, so the line says "Services". Tap Edit to change it'
 )
 NEED_AMOUNT = "I need at least one item with an amount to draft an invoice."
 NO_COMPANIES_FOR_USER = "No companies are available to you. Create one in the admin panel first."
@@ -609,3 +614,32 @@ def report(title: str, period, totals, receivables, open_summary, payables, tips
     if link:
         out.append(f"\n{escape(link)}")
     return "\n".join(out)
+
+
+# --- supplier invoices by email -------------------------------------------------------------
+
+BTN_MAIL_READ = "📄 Read & prepare payment"
+BTN_MAIL_IGNORE = "✖ Ignore"
+NO_MAIL = "No supplier invoices waiting from email."
+MAIL_UNVERIFIED_NOTE = (
+    "⚠️ From an email that could not be verified: confirm the IBAN with the supplier by phone "
+    "before paying."
+)
+
+
+def mail_card(m, company, known: str | None) -> str:  # noqa: ANN001
+    auth = {
+        "pass": "✅ verified sender (SPF/DKIM)",
+        "fail": "❌ <b>failed SPF/DKIM checks</b> — possibly forged, be careful",
+    }.get(m.auth, "⚠️ sender not verified")
+    lines = [
+        f"📧 <b>Invoice by email</b> to <b>{escape(company.code)}</b>",
+        f"From: {escape(m.sender or '?')} · {auth}",
+        f"Known as: <b>{escape(known)}</b>" if known else "Unknown sender",
+    ]
+    if m.subject:
+        lines.append(f"Subject: {escape(m.subject[:150])}")
+    lines.append("Files: " + ", ".join(escape(f["name"]) for f in m.attachments))
+    if m.status.value == "FAILED" and m.detail:
+        lines.append(f"Last try: {escape(m.detail[:200])}")
+    return "\n".join(lines)[:1000]

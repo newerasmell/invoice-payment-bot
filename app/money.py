@@ -30,6 +30,22 @@ def _normalize(raw: str) -> str:
     return s
 
 
+_SHORTHAND = re.compile(r"^(-?[\d.,\s]+?)\s*(k|m|mn|mln)\.?$", re.I)
+_MULTIPLIER = {"k": 1000, "m": 1_000_000, "mn": 1_000_000, "mln": 1_000_000}
+
+
+def _expand_shorthand(raw: str) -> str | None:
+    """ "36k" -> "36000", "1.5m" -> "1500000" (people write amounts like that in chat)."""
+    m = _SHORTHAND.match(_CURRENCY_MARKS.sub("", raw.strip()).strip())
+    if not m:
+        return None
+    try:
+        number = Decimal(_normalize(m.group(1)))
+    except InvalidOperation:
+        return None
+    return str(number * _MULTIPLIER[m.group(2).lower()])
+
+
 def to_money(value: str | int | Decimal) -> Decimal:
     """Parse a user- or API-supplied amount into a 2-decimal Decimal.
 
@@ -38,7 +54,7 @@ def to_money(value: str | int | Decimal) -> Decimal:
     if isinstance(value, float):
         raise TypeError("floats are not accepted for money; pass a str or Decimal")
     if isinstance(value, str):
-        cleaned = _normalize(value)
+        cleaned = _expand_shorthand(value) or _normalize(value)
         try:
             value = Decimal(cleaned)
         except InvalidOperation as e:

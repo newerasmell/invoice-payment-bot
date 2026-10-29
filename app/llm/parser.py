@@ -7,6 +7,7 @@ proposed issuer/client against the DB and a human approves everything in Telegra
 import base64
 import json
 import logging
+import re
 from dataclasses import dataclass
 from datetime import date
 from decimal import Decimal
@@ -31,15 +32,24 @@ class ParserError(RuntimeError):
 class DraftLine(BaseModel):
     _blanks = model_validator(mode="before")(classmethod(lambda cls, d: _blank_to_none(d)))
 
-    description: str = Field(min_length=1, max_length=500)
+    # Empty when the operator gave none ("invoice for 36k"): the bot fills a default and warns.
+    description: str = Field(default="", max_length=500)
     quantity: Decimal = Decimal("1")
     unit_price: Decimal
     unit: str | None = None
 
+    @field_validator("description", mode="before")
+    @classmethod
+    def _desc(cls, v: Any) -> str:
+        return str(v or "").strip()[:500]
+
     @field_validator("quantity", mode="before")
     @classmethod
     def _qty(cls, v: Any) -> Decimal:
-        d = Decimal(str(v).replace(",", "."))
+        m = re.search(r"-?\d+(?:[.,]\d+)?", str(v or ""))
+        if not m:
+            return Decimal("1")  # "", "one", missing: one unit
+        d = Decimal(m.group(0).replace(",", "."))
         if d <= 0:
             raise ValueError("quantity must be positive")
         return d
@@ -121,6 +131,22 @@ class DocumentRead(BaseModel):
         return v if len(v) == 3 and v.isalpha() else None
 
 
+_CURRENCY_WORDS = {
+    "€": "EUR",
+    "EURO": "EUR",
+    "EUROS": "EUR",
+    "$": "USD",
+    "DOLLAR": "USD",
+    "DOLLARS": "USD",
+    "£": "GBP",
+    "POUND": "GBP",
+    "POUNDS": "GBP",
+    "ЛВ": "BGN",
+    "ЛВ.": "BGN",
+    "LEVA": "BGN",
+}
+
+
 class InvoiceDraft(BaseModel):
     _blanks = model_validator(mode="before")(classmethod(lambda cls, d: _blank_to_none(d)))
 
@@ -141,25 +167,50 @@ class InvoiceDraft(BaseModel):
     notes: str | None = None
     unclear: str | None = None  # short note on anything ambiguous
 
-    @field_validator("currency")
+    # Every optional field degrades to None instead of failing the whole request: the bot then
+    # asks for what is missing (one odd value from the model must not lose the message).
+    @field_validator("currency", mode="before")
     @classmethod
-    def _cur(cls, v: str | None) -> str | None:
+    def _cur(cls, v: Any) -> str | None:
         if v is None:
             return None
-        v = v.strip().upper()
-        if len(v) != 3 or not v.isalpha():
-            raise ValueError("currency must be a 3-letter ISO code")
-        return v
+        v = str(v).strip().upper()
+        v = _CURRENCY_WORDS.get(v, v)
+        return v if len(v) == 3 and v.isalpha() else None
 
     @field_validator("vat_rate", mode="before")
     @classmethod
     def _vat(cls, v: Any) -> Decimal | None:
-        if v is None or v == "":
+        m = re.search(r"\d+(?:[.,]\d+)?", str(v or ""))
+        if not m:
             return None
-        d = Decimal(str(v).replace(",", "."))
-        if not (0 <= d <= 100):
-            raise ValueError("vat_rate must be a percentage between 0 and 100")
-        return d
+        d = Decimal(m.group(0).replace(",", "."))
+        return d if 0 <= d <= 100 else None
+
+    @field_validator("lines", mode="before")
+    @classmethod
+    def _lines(cls, v: Any) -> list[Any]:
+        """Drop lines without a usable price instead of rejecting the whole draft; with no lines
+        left the bot asks for the amount."""
+        out = []
+        for item in v or []:
+            try:
+                out.append(DraftLine.model_validate(item))
+            except ValidationError:
+                log.info("dropped a draft line without a usable price: %.200s", item)
+        return out
+
+    @field_validator("client_id", mode="before")
+    @classmethod
+    def _client_id(cls, v: Any) -> int | None:
+        s = str(v or "").strip()
+        return int(s) if s.isdigit() else None
+
+    @field_validator("due_in_days", mode="before")
+    @classmethod
+    def _due(cls, v: Any) -> int | None:
+        m = re.search(r"\d+", str(v or ""))
+        return int(m.group(0)) if m and int(m.group(0)) <= 365 else None
 
 
 # Structured outputs cap the number of union-typed (nullable) fields, so every optional value is
@@ -361,6 +412,14 @@ def _user_prompt(text: str, ctx: ParseContext) -> str:
     return "\n\n".join(parts)
 
 
+def _short_errors(e: Exception | None) -> str:
+    if not isinstance(e, ValidationError):
+        return "no valid answer"
+    return "; ".join(
+        f"{'.'.join(str(p) for p in err['loc'])}: {err['msg']}" for err in e.errors()[:3]
+    )[:200]
+
+
 class InvoiceParser:
     def __init__(self, api_key: str | None, model: str) -> None:
         self.model = model
@@ -421,14 +480,20 @@ class InvoiceParser:
             raise ParserUnavailable("ANTHROPIC_API_KEY is not set")
         prompt = _user_prompt(text, ctx)
         last_error: Exception | None = None
-        for attempt in (1, 2):  # one retry on invalid output
+        for attempt in (1, 2):  # one retry on invalid output, told what was wrong
             raw = await self._call(SYSTEM, prompt, DRAFT_SCHEMA, attachments)
             try:
                 return InvoiceDraft.model_validate_json(_strip_fences(raw))
             except ValidationError as e:
                 last_error = e
-                log.warning("invalid draft from model (attempt %d): %s", attempt, e)
-        raise ParserError("Could not understand the request; please rephrase it") from last_error
+                log.warning("invalid draft from model (attempt %d): %s | %.500s", attempt, e, raw)
+                prompt = (
+                    f"{_user_prompt(text, ctx)}\n\nYour previous answer was rejected: "
+                    f"{_short_errors(e)}. Answer again following the field rules."
+                )
+        raise ParserError(
+            f"Could not understand the request ({_short_errors(last_error)}); please rephrase it"
+        ) from last_error
 
     async def read_document(self, text: str, attachments: tuple[Attachment, ...]) -> DocumentRead:
         if self._client is None:

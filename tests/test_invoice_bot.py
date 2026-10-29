@@ -356,3 +356,18 @@ async def test_credit_note_flow(harness: BotHarness, db) -> None:
         assert orig.status == InvoiceStatus.CANCELLED and note.notes == "wrong client"
     listing = await harness.send("/invoices")
     assert "credit note 0000000002" in listing[-1]
+
+
+async def test_short_request_without_description(harness: BotHarness, db) -> None:
+    """Production 2026-10-29: "invoice from TPL to NSOL for 36k" was rejected because the model
+    returned an empty description. Now the line says "Services" and the draft warns."""
+    cid = await _client(db)
+    harness.parser.queue.append(
+        draft(
+            client_id=cid,
+            lines=[{"description": "", "quantity": "", "unit_price": "36k", "unit": ""}],
+        )
+    )
+    [preview] = docs(await harness.send_raw("invoice from Z to Client Ltd for 36k"))
+    assert "• Services — 1 × 36,000.00" in preview.caption
+    assert "No description of the service was given" in preview.caption

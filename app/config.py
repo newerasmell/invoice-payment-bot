@@ -1,5 +1,6 @@
 import os
 import re
+from dataclasses import dataclass, field
 from decimal import Decimal
 from enum import StrEnum
 from functools import lru_cache
@@ -11,6 +12,20 @@ from pydantic import AliasChoices, Field, SecretStr, field_validator
 from pydantic_settings import BaseSettings, NoDecode, SettingsConfigDict
 
 _PAYNETICS_KEY = re.compile(r"^PAYNETICS_([A-Z0-9_]+)_ACCESS_TOKEN$")
+_IMAP_HOST = re.compile(r"^IMAP_([A-Z0-9_]+)_HOST$")
+
+
+@dataclass(frozen=True)
+class ImapMailbox:
+    host: str
+    port: int
+    user: str
+    password: str = field(repr=False)
+    folder: str = "INBOX"
+
+    @property
+    def key(self) -> str:
+        return f"{self.user}@{self.host}/{self.folder}"
 
 
 class BankProviderName(StrEnum):
@@ -75,6 +90,11 @@ class Settings(BaseSettings):
     reminder_check_seconds: int = 3600
     reminder_repeat_hours: int = 24
     instruction_timeout_hours: int = 48
+    # Supplier invoices by email (Flow D): per-company IMAP_<CODE>_* variables.
+    imap_enabled: bool = True
+    imap_poll_seconds: int = 300
+    imap_lookback_days: int = 3  # first run of a mailbox: only this many days back
+
     # Weekly summary to approvers (Monday 08:00 local time by default).
     weekly_digest_enabled: bool = True
     digest_weekday: int = 0  # 0 = Monday
@@ -97,11 +117,7 @@ class Settings(BaseSettings):
 
         Codes are upper-case; a "-" in a company code is written as "_" in the variable name.
         """
-        env: dict[str, str] = {}
-        env_file = self.model_config.get("env_file")
-        if env_file and Path(str(env_file)).is_file():
-            env.update({k: v for k, v in dotenv_values(str(env_file)).items() if v})
-        env.update(os.environ)
+        env = self._env()
         creds: dict[str, tuple[str, str]] = {}
         for key, token in env.items():
             m = _PAYNETICS_KEY.match(key)
@@ -111,6 +127,37 @@ class Settings(BaseSettings):
             if secret:
                 creds[m[1]] = (token.strip(), secret.strip())
         return creds
+
+    def imap_mailboxes(self) -> dict[str, "ImapMailbox"]:
+        """{COMPANY_CODE: mailbox} from IMAP_<CODE>_HOST / _USER / _PASSWORD (+ optional _PORT,
+        _FOLDER). The mailbox belongs to that company: invoices in it are invoices it pays."""
+        env = self._env()
+        out: dict[str, ImapMailbox] = {}
+        for key, host in env.items():
+            m = _IMAP_HOST.match(key)
+            if not m or not host:
+                continue
+            code = m[1]
+            user, password = env.get(f"IMAP_{code}_USER"), env.get(f"IMAP_{code}_PASSWORD")
+            if not user or not password:
+                continue
+            port = env.get(f"IMAP_{code}_PORT", "993")
+            out[code] = ImapMailbox(
+                host=host.strip(),
+                port=int(port) if port.strip().isdigit() else 993,
+                user=user.strip(),
+                password=password,
+                folder=(env.get(f"IMAP_{code}_FOLDER") or "INBOX").strip(),
+            )
+        return out
+
+    def _env(self) -> dict[str, str]:
+        env: dict[str, str] = {}
+        env_file = self.model_config.get("env_file")
+        if env_file and Path(str(env_file)).is_file():
+            env.update({k: v for k, v in dotenv_values(str(env_file)).items() if v})
+        env.update(os.environ)
+        return env
 
     @property
     def dev_commands_enabled(self) -> bool:

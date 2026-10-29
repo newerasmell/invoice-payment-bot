@@ -19,6 +19,7 @@ BOT_COMMANDS = [
     BotCommand(command="companies", description="Company profiles"),
     BotCommand(command="balance", description="Account balance: /balance <company>"),
     BotCommand(command="report", description="Money in/out, owed to us, to pay"),
+    BotCommand(command="inbox", description="Supplier invoices received by email"),
     BotCommand(command="requests", description="Client invoice requests waiting"),
     BotCommand(command="credit", description="Credit note for an issued invoice"),
     BotCommand(command="cancel", description="Cancel the current edit"),

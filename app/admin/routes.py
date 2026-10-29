@@ -80,9 +80,22 @@ DB = Annotated[AsyncSession, Depends(get_session)]
 Cfg = Annotated[Settings, Depends(get_settings)]
 
 
+def _mailbox_status(settings: Settings, code: str) -> dict[str, Any]:
+    from app.inbox.service import STATUS
+
+    key = _env_code(code)
+    st = STATUS.get(key)
+    return {
+        "configured": key in settings.imap_mailboxes(),
+        "checked_at": st.checked_at if st else None,
+        "error": st.error if st else None,
+    }
+
+
 def render(request: Request, name: str, status_code: int = 200, **ctx: Any) -> HTMLResponse:
     ctx.setdefault("flash", request.session.pop("flash", None))
     ctx["csrf"] = csrf_token(request)
+    ctx.setdefault("mailbox_status", lambda code: _mailbox_status(request.app.state.settings, code))
     return templates.TemplateResponse(request, name, ctx, status_code=status_code)
 
 
@@ -1325,6 +1338,36 @@ async def outbound_ip() -> str:
 
 def _env_code(code: str) -> str:
     return code.upper().replace("-", "_")
+
+
+@router.post("/companies/{company_id}/imap-test")
+async def company_imap_test(
+    request: Request, company_id: int, session: DB, settings: Cfg
+) -> Response:
+    from app.inbox import mail
+
+    company = await load_company(session, company_id)
+    await posted(request)
+    box = settings.imap_mailboxes().get(_env_code(company.code))
+    result: dict[str, Any] = {}
+    if box is None:
+        result["error"] = "No IMAP settings for this company in the environment."
+    else:
+        try:
+            result = {"key": box.key, "count": await asyncio.to_thread(mail.check_login, box)}
+        except mail.MailError as e:
+            result["error"] = str(e)
+        audit(
+            session,
+            ACTOR,
+            "inbox.tested",
+            f"company:{company.id}",
+            {"ok": "error" not in result},
+        )
+        await session.commit()
+    return render(
+        request, "company_form.html", company=company, values={}, errors={}, imap_test=result
+    )
 
 
 @router.post("/companies/{company_id}/bank-test")

@@ -253,6 +253,10 @@ async def _parse(
         current_draft=current,
     )
     draft = await parser.parse(text, ctx, attachments)
+    if any(not li.description for li in draft.lines):
+        for li in draft.lines:
+            li.description = li.description or texts.DEFAULT_LINE
+        draft.unclear = "; ".join(filter(None, [draft.unclear, texts.NO_DESCRIPTION]))
     return draft, companies, clients, all_companies
 
 

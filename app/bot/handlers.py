@@ -11,6 +11,7 @@ from app.bank.base import BankProvider
 from app.bank.mock import MockBankProvider
 from app.bot import (
     documents_flow,
+    inbox_flow,
     invoice_flow,
     payments_flow,
     report_flow,
@@ -181,6 +182,7 @@ def make_routers(dev_commands: bool) -> list[Router]:
         payments_flow.make_router(),
         requests_flow.make_router(),
         report_flow.make_router(),
+        inbox_flow.make_router(),
         documents_flow.make_router(),
         invoice_flow.make_router(),
         fallback_router,

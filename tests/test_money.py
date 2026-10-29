@@ -22,6 +22,11 @@ from app.redact import redact_iban
         ("0.005", "0.01"),  # half-up, not banker's rounding
         ("0.015", "0.02"),
         ("2.675", "2.68"),
+        ("36k", "36000.00"),
+        ("36 K", "36000.00"),
+        ("€36k", "36000.00"),
+        ("1.5m", "1500000.00"),
+        ("2,5 mln", "2500000.00"),
         (Decimal("10"), "10.00"),
         (7, "7.00"),
     ],
@@ -35,7 +40,7 @@ def test_float_rejected() -> None:
         to_money(1.5)  # type: ignore[arg-type]
 
 
-@pytest.mark.parametrize("raw", ["abc", "", "NaN", "Infinity"])
+@pytest.mark.parametrize("raw", ["abc", "", "NaN", "Infinity", "k", "36kk"])
 def test_invalid(raw: str) -> None:
     with pytest.raises(InvalidAmount):
         to_money(raw)

@@ -250,6 +250,38 @@ class InvoiceRequest(Timestamped, Base):
     decline_reason: Mapped[str | None] = mapped_column(Text)
 
 
+class InboxStatus(StrEnum):
+    NEW = "NEW"  # waiting for a human in Telegram
+    PREPARED = "PREPARED"  # read and turned into a payment instruction
+    IGNORED = "IGNORED"
+    FAILED = "FAILED"  # could not be read; see detail
+    SKIPPED = "SKIPPED"  # no invoice attachment: recorded only to remember the UID
+
+
+class InboxMessage(Timestamped, Base):
+    """An email seen in one of our companies' mailboxes (Flow D). Emails are untrusted: they
+    only trigger a Telegram notice; a human decides what happens."""
+
+    __tablename__ = "inbox_messages"
+    __table_args__ = (UniqueConstraint("mailbox", "uid_validity", "uid"),)
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    company_id: Mapped[int] = mapped_column(Integer, index=True)
+    mailbox: Mapped[str] = mapped_column(String(255))
+    uid_validity: Mapped[int] = mapped_column(BigInteger)
+    uid: Mapped[int] = mapped_column(BigInteger)
+    message_id: Mapped[str | None] = mapped_column(String(255))
+    sender: Mapped[str | None] = mapped_column(String(255))
+    subject: Mapped[str | None] = mapped_column(String(500))
+    received_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    auth: Mapped[str] = mapped_column(String(16), default="unverified")  # pass|fail|unverified
+    attachments: Mapped[list[dict[str, Any]]] = mapped_column(JSON, default=list)
+    status: Mapped[InboxStatus] = mapped_column(_enum(InboxStatus), default=InboxStatus.NEW)
+    instruction_id: Mapped[int | None] = mapped_column(Integer)
+    decided_by: Mapped[int | None] = mapped_column(BigInteger)
+    detail: Mapped[str | None] = mapped_column(Text)
+
+
 class Contract(Timestamped, Base):
     __tablename__ = "contracts"
 

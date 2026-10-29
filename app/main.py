@@ -66,13 +66,18 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         poller: asyncio.Task[None] | None = None
         if settings.poll_enabled:
             poller = asyncio.create_task(poll_forever(settings, db, bank, bot))
+        inbox: asyncio.Task[None] | None = None
+        if settings.imap_enabled and settings.imap_mailboxes():
+            from app.inbox.service import inbox_forever
+
+            inbox = asyncio.create_task(inbox_forever(settings, db, bot))
         reminders: asyncio.Task[None] | None = None
         if settings.reminders_enabled:
             reminders = asyncio.create_task(remind_forever(settings, db, bot))
         try:
             yield
         finally:
-            for task in (poller, reminders):
+            for task in (poller, reminders, inbox):
                 if task:
                     task.cancel()
                     with suppress(asyncio.CancelledError):

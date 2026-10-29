@@ -56,33 +56,59 @@ async def test_valid_output() -> None:
     assert d.lines[0].unit_price == Decimal("1200.00") and d.vat_rate == Decimal("20")
 
 
-async def test_retries_once_then_fails() -> None:
-    bad = json.dumps({**GOOD, "lines": [{**GOOD["lines"][0], "unit_price": "abc"}]})
-    d = await parser_returning(bad, json.dumps(GOOD)).parse("x", CTX)
+async def test_retries_once_with_feedback_then_fails() -> None:
+    prompts: list[str] = []
+    p = InvoiceParser("test-key", "claude-sonnet-5-5")
+    queue = ["not json", json.dumps(GOOD)]
+
+    async def fake_call(system: str, prompt: str, schema: dict, attachments=()) -> str:  # noqa: ANN001
+        prompts.append(prompt)
+        return queue.pop(0)
+
+    p._call = fake_call  # type: ignore[method-assign]
+    d = await p.parse("x", CTX)
     assert d.lines[0].unit_price == Decimal("1200.00")
+    assert "previous answer was rejected" in prompts[1]
     with pytest.raises(ParserError, match="rephrase"):
-        await parser_returning("not json", bad).parse("x", CTX)
+        await parser_returning("not json", "{}").parse("x", CTX)
 
 
 @pytest.mark.parametrize(
-    ("patch", "msg"),
+    ("patch", "field", "expected"),
     [
-        ({"currency": "EURO"}, "currency"),
-        ({"vat_rate": "150"}, "vat_rate"),
-        (
-            {"lines": [{"description": "x", "quantity": "-1", "unit_price": "5", "unit": None}]},
-            "quantity",
-        ),
-        (
-            {"lines": [{"description": "x", "quantity": "1", "unit_price": "0", "unit": None}]},
-            "unit price",
-        ),
-        ({"due_in_days": 9999}, "due_in_days"),
+        ({"currency": "EURO"}, "currency", "EUR"),
+        ({"currency": "dollars"}, "currency", "USD"),
+        ({"currency": "Monopoly money"}, "currency", None),
+        ({"vat_rate": "20%"}, "vat_rate", Decimal("20")),
+        ({"vat_rate": "150"}, "vat_rate", None),
+        ({"due_in_days": "30 days"}, "due_in_days", 30),
+        ({"due_in_days": 9999}, "due_in_days", None),
+        ({"client_id": "NSOL"}, "client_id", None),
+        ({"client_id": "7"}, "client_id", 7),
     ],
 )
-def test_validation_rejects_bad_values(patch: dict, msg: str) -> None:
-    with pytest.raises(ValueError, match=msg):
-        InvoiceDraft.model_validate({**GOOD, **patch})
+def test_odd_values_degrade_instead_of_failing(patch: dict, field: str, expected) -> None:  # noqa: ANN001
+    assert getattr(InvoiceDraft.model_validate({**GOOD, **patch}), field) == expected
+
+
+def test_lines_are_lenient_but_never_invent() -> None:
+    def lines(*items: dict) -> list:
+        return InvoiceDraft.model_validate({**GOOD, "lines": list(items)}).lines
+
+    # "invoice for 36k from TPL to NSOL": no description, quantity left empty, shorthand amount.
+    [li] = lines({"description": "", "quantity": "", "unit_price": "36k", "unit": ""})
+    assert (li.description, li.quantity, li.unit_price) == ("", Decimal("1"), Decimal("36000.00"))
+    assert lines({"description": "x", "quantity": "2 pcs", "unit_price": "1.5m", "unit": ""})[
+        0
+    ].unit_price == Decimal("1500000.00")
+    # Lines with no usable price or a negative quantity are dropped, never guessed.
+    bad = [
+        {"description": "x", "quantity": "1", "unit_price": "", "unit": ""},
+        {"description": "x", "quantity": "1", "unit_price": "abc", "unit": ""},
+        {"description": "x", "quantity": "1", "unit_price": "0", "unit": ""},
+        {"description": "x", "quantity": "-1", "unit_price": "5", "unit": ""},
+    ]
+    assert lines(*bad) == []
 
 
 def test_no_floats_in_money() -> None:

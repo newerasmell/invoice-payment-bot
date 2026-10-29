@@ -75,6 +75,14 @@ from code: transfers are executed by a human in the bank panel. See `CLAUDE.md` 
 - **/report (done):** `/report [last|30|year|YYYY-MM]` summary in Telegram with a link to
   Finance; a weekly summary goes to approvers on Mondays at 08:00 (`WEEKLY_DIGEST_ENABLED`,
   `DIGEST_WEEKDAY`, `DIGEST_HOUR`, `TIMEZONE`).
+- **Supplier invoices by email (done, Flow D):** per company `IMAP_<CODE>_HOST`, `_USER`,
+  `_PASSWORD` (optional `_PORT`, `_FOLDER`). Every `IMAP_POLL_SECONDS` the mailbox is read
+  **read-only** (nothing is marked as read); emails with a PDF or a photographed invoice show up
+  in Telegram (also `/inbox`) with the attachment, the SPF/DKIM verdict from our mail provider
+  and whether the sender is known, plus **Read & prepare payment / Ignore**. Reading creates a
+  payment instruction for that company (still needs approval); unverified emails get a
+  "confirm the IBAN by phone" warning. Admin → company → **Test mailbox**.
+  Gmail: enable IMAP and use an app password. Microsoft 365 needs OAuth (not built yet).
 - **Credit notes (done):** `/credit <invoice number> [reason]` drafts a credit note for the full
   amount (negative lines, same parties as the invoice) with Approve / Reject. Approval gives it
   the next number in the issuer's series and cancels the invoice (a PAID one stays PAID; the
